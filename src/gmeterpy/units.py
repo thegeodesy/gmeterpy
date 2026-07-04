@@ -15,6 +15,10 @@ from astropy.units import cds
 
 
 # define namespace
-def_unit(['E', 'Eotvos'], represents=1e-9 * s**-2,
-         doc='Eötvös-unit for the gravity gradient.',
-         prefixes=True, namespace=globals())
+def_unit(
+    ["E", "Eotvos"],
+    represents=1e-9 * s**-2,
+    doc="Eötvös-unit for the gravity gradient.",
+    prefixes=True,
+    namespace=globals(),
+)

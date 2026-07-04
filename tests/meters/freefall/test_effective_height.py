@@ -6,15 +6,14 @@ Test finite speed of light corrections module.
 import numpy as np
 
 import gmeterpy.units as u
-
-from gmeterpy.meters.freefall.effective_height import free_fall_effective_measurement_height
-from gmeterpy.meters.freefall.effective_height import tod_to_t0_distance
+from gmeterpy.meters.freefall.effective_height import (
+    free_fall_effective_measurement_height,
+    tod_to_t0_distance,
+)
 
 
 def test_free_fall_effective_measurement_height():
-    """Test finite speed of light est correction.
-
-    """
+    """Test finite speed of light est correction."""
 
     # g0 = 9.81570660 * u.m / u.s**2
     initial_velocity = 0.4412051 * u.m / u.s
@@ -22,8 +21,7 @@ def test_free_fall_effective_measurement_height():
 
     h_eff_ref = 0.144878 * u.m
 
-    h_eff = free_fall_effective_measurement_height(initial_velocity,
-                                                   drop_duration)
+    h_eff = free_fall_effective_measurement_height(initial_velocity, drop_duration)
 
     # test units
     assert isinstance(h_eff, u.Quantity)
@@ -32,9 +30,7 @@ def test_free_fall_effective_measurement_height():
 
 
 def test_tod_to_t0_distance():
-    """Test TOD to t=0 distance calculation.
-
-    """
+    """Test TOD to t=0 distance calculation."""
 
     g0 = 9.81570660 * u.m / u.s**2
     initial_velocity = 0.4412051 * u.m / u.s

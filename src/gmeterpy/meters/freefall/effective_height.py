@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Effective height calclulation for absolute gravimeters.
 
 This module contatins functions for calculation the effective height, i.e. the
@@ -54,11 +53,17 @@ def free_fall_effective_measurement_height(initial_velocity, drop_duration):
     T2 = T**2
     T3 = T**3
 
-    h_eff_numerator = 56. * v0**4 * T + 102.4 * v03 * g0 * T2 +\
-        61.2 * v02 * g02 * T3 + 14.0 * v0 * g03 * T**4 + g0**4 * T**5
+    h_eff_numerator = (
+        56.0 * v0**4 * T
+        + 102.4 * v03 * g0 * T2
+        + 61.2 * v02 * g02 * T3
+        + 14.0 * v0 * g03 * T**4
+        + g0**4 * T**5
+    )
 
-    h_eff_denominator = 112. * v03 + 168. * v02 * g0 * T + 67.2 * v0 * g02 * T2 +\
-        5.6 * g03 * T3
+    h_eff_denominator = (
+        112.0 * v03 + 168.0 * v02 * g0 * T + 67.2 * v0 * g02 * T2 + 5.6 * g03 * T3
+    )
 
     h_eff = h_eff_numerator / h_eff_denominator
 

@@ -1,9 +1,7 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 
-import numpy as np
-import pandas as pd
 import matplotlib.pylab as plt
+import numpy as np
 import statsmodels.api as sm
 from scipy.stats import chi2
 
@@ -55,16 +53,14 @@ class AdjustmentResults:
     def chi2(self, alpha=0.95, scale=1.0):
         dof = self.degrees_of_freedom
         lower, upper = np.asarray(chi2.interval(alpha=alpha, df=dof))
-        chisq = self.s0**2/scale**2 * dof
+        chisq = self.s0**2 / scale**2 * dof
         return chisq, lower, upper
 
     def qqplot(self, ax=None, **kwargs):
-        """Q-Q plot of the residuals.
-
-        """
+        """Q-Q plot of the residuals."""
         if ax is None:
-            fig, ax = plt.subplots(figsize=(4, 3))
+            _fig, ax = plt.subplots(figsize=(4, 3))
 
-        sm.graphics.qqplot(self.res.resid, fit=True, line='s', ax=ax, **kwargs)
-        ax.set_title('Normal Q-Q plot')
+        sm.graphics.qqplot(self.res.resid, fit=True, line="s", ax=ax, **kwargs)
+        ax.set_title("Normal Q-Q plot")
         return ax

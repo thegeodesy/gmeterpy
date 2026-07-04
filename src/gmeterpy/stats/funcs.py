@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 
 import numpy as np
 from scipy.stats import t
@@ -23,20 +22,20 @@ def grubbs_outlier_test(y_i, alpha=0.95):
     G_i = np.abs(y_i - y_i.mean()) / s
     N = y_i.size
     # Upper critical value of the t-distribution with N − 2 degrees of freedom and a significance level of α/(2N)
-    tcrit = t.isf(1 - alpha/(2*N), N-2)
-    Gtest = (N-1)/np.sqrt(N) * np.sqrt(t**2 / (N-2+tcrit**2))
+    tcrit = t.isf(1 - alpha / (2 * N), N - 2)
+    Gtest = (N - 1) / np.sqrt(N) * np.sqrt(t**2 / (N - 2 + tcrit**2))
     G = G_i.max()
     index = G_i.argmax()
-    no_outliers = (G > Gtest)
+    no_outliers = G > Gtest
     return [G_i, Gtest, no_outliers, index]
 
 
 def tau_outlier_test(x, scale=1.0, alpha=0.05):
     dof = x.size
-    t_half_alpha = t.ppf(1 - alpha/2, dof - 1)
+    t_half_alpha = t.ppf(1 - alpha / 2, dof - 1)
     tau_half_alpha = t_half_alpha * np.sqrt(dof)
     tau_half_alpha /= np.sqrt(dof - 1 + t_half_alpha**2)
-    return np.abs(x)/scale <= tau_half_alpha
+    return np.abs(x) / scale <= tau_half_alpha
 
 
 def rms(x):

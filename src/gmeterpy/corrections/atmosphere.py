@@ -1,12 +1,11 @@
-# -*- coding: utf-8 -*-
 """Atmospheric pressure correction.
 
 This module contains the atmospheric correction to the gravity observations.
 
 """
 
-import gmeterpy.units as u
 import gmeterpy.constants as c
+import gmeterpy.units as u
 
 
 @u.quantity_input
@@ -42,15 +41,15 @@ def normal_pressure(height: u.m) -> u.Pa:
 
     """
     # pn = 101325 * (1 - 0.0065 * height / 288.15) ** 5.2559
-    pn = c.p0 * (1 - c.L * height / c.Tn)**(c.gn * c.M / c.R / c.L).round(4)
+    pn = c.p0 * (1 - c.L * height / c.Tn) ** (c.gn * c.M / c.R / c.L).round(4)
 
     return pn
 
 
 @u.quantity_input
-def atmospheric_pressure_correction(height: u.m, pressure: u.Pa,
-                                    barometric_factor:
-                                    u.uGal / u.mbar = c.atm_sens) -> u.uGal:
+def atmospheric_pressure_correction(
+    height: u.m, pressure: u.Pa, barometric_factor: u.uGal / u.mbar = c.atm_sens
+) -> u.uGal:
     r"""Atmospheric pressure correction.
 
     Parameters

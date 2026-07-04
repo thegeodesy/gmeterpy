@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Correction due to the finite speed of light for absolute gravimeters.
 
 This module contatins functions for calculation of the correction due to the
@@ -7,15 +6,14 @@ It is also known as a Doppler-shift correction.
 
 """
 
-import gmeterpy.units as u
 import gmeterpy.constants as const
+import gmeterpy.units as u
 
 
-@u.quantity_input(gravity=u.m / u.s**2, initial_velocity=u.m / u.s,
-                  drop_duration=u.s)
-def finite_speed_of_light_correction(gravity, initial_velocity,
-                                     drop_duration, beam_splitter_above=False,
-                                     schema='est'):
+@u.quantity_input(gravity=u.m / u.s**2, initial_velocity=u.m / u.s, drop_duration=u.s)
+def finite_speed_of_light_correction(
+    gravity, initial_velocity, drop_duration, beam_splitter_above=False, schema="est"
+):
     r"""Correction due to the finite speed of light.
 
     This is the correction due to the finite speed of light
@@ -75,16 +73,21 @@ def finite_speed_of_light_correction(gravity, initial_velocity,
     g0 = gravity
     v0 = initial_velocity
 
-    if schema == 'est':
+    if schema == "est":
         c1 = 0.5 * T
-    elif schema == 'esd':
-        c1_u = T * (4 * g0**3 * T**3 + 45 * g0**2 * T**2 * v0
-                    + 108 * g0 * T * v0**2 + 70 * v0**3)
-        c1_d = 7 * (g0**3 * T**3 + 12 * g0**2 * T**2 * v0
-                    + 30 * g0 * T * v0**2 + 20 * v0**3)
+    elif schema == "esd":
+        c1_u = T * (
+            4 * g0**3 * T**3
+            + 45 * g0**2 * T**2 * v0
+            + 108 * g0 * T * v0**2
+            + 70 * v0**3
+        )
+        c1_d = 7 * (
+            g0**3 * T**3 + 12 * g0**2 * T**2 * v0 + 30 * g0 * T * v0**2 + 20 * v0**3
+        )
         c1 = c1_u / c1_d
     else:
-        raise ValueError('{} is not valid schema'.format(schema))
+        raise ValueError(f"{schema} is not valid schema")
 
     fsol = sign * 3 * g0 / const.c * (v0 + g0 * c1)
 

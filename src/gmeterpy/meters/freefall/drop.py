@@ -1,18 +1,19 @@
 #!/usr/bin/env python
-# encoding: utf-8
 
 import numpy as np
 import statsmodels.api as sm
 
 import gmeterpy.units as u
-from gmeterpy.meters.freefall.effective_height import free_fall_effective_measurement_height
+from gmeterpy.meters.freefall.effective_height import (
+    free_fall_effective_measurement_height,
+)
 
 
 class FreeFallDrop:
     def __init__(self, time, distance, **kwargs):
         self._time = time
         self._distance = distance
-        self._meta = kwargs.pop('meta', None)
+        self._meta = kwargs.pop("meta", None)
 
     @classmethod
     def from_random(cls):
@@ -20,16 +21,12 @@ class FreeFallDrop:
 
     @property
     def time(self):
-        """Return time intervals.
-
-        """
+        """Return time intervals."""
         return self._time
 
     @property
     def distance(self):
-        """Return distance intervals.
-
-        """
+        """Return distance intervals."""
         return self._distance
 
     def truncate(self, before=0, after=0):
@@ -42,7 +39,7 @@ class FreeFallDrop:
 
         return self
 
-    def fit(self, model='OLS', gradient=0.0, **kwargs):
+    def fit(self, model="OLS", gradient=0.0, **kwargs):
 
         time = self.time
         time_sq = time**2
@@ -55,10 +52,10 @@ class FreeFallDrop:
         # design matrix
         X = np.column_stack((v0, g0, z0))
 
-        if model == 'OLS':
+        if model == "OLS":
             res = sm.OLS(self.distance, X, **kwargs).fit()
-        elif model == 'RLM':
-            M = kwargs.pop('M', sm.robust.norms.AndrewWave())
+        elif model == "RLM":
+            M = kwargs.pop("M", sm.robust.norms.AndrewWave())
             res = sm.RLM(self.distance, X, M=M).fit()
 
         return FreeFallDropResults(self, res)
@@ -72,17 +69,17 @@ class FreeFallDropResults:
 
         self._results = {}
 
-        self._results['g0'] = stats_results.params[1] * 1e8
-        self._results['err'] = stats_results.bse[1] * 1e8
-        self._results['v0'] = stats_results.params[0]
-        self._results['z0'] = stats_results.params[2]
-        self._results['drop_duration'] = self._model.time[-1]
+        self._results["g0"] = stats_results.params[1] * 1e8
+        self._results["err"] = stats_results.bse[1] * 1e8
+        self._results["v0"] = stats_results.params[0]
+        self._results["z0"] = stats_results.params[2]
+        self._results["drop_duration"] = self._model.time[-1]
 
         h_eff = free_fall_effective_measurement_height(
-            self.results['v0'] * u.m / u.s,
-            self.results['drop_duration'] * u.s)
+            self.results["v0"] * u.m / u.s, self.results["drop_duration"] * u.s
+        )
         # effective height - legacy
-        self._results['h1'] = h_eff.value
+        self._results["h1"] = h_eff.value
 
     @property
     def results(self):

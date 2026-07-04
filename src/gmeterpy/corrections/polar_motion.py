@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Polar motion correction.
 
 This module contains the polar motion correction to the gravity observations.
@@ -6,24 +5,26 @@ This module contains the polar motion correction to the gravity observations.
 """
 
 import warnings
+
 import numpy as np
 from astropy.utils import iers
 
 import gmeterpy.units as u
 from gmeterpy.constants import omega
 
-
 iers.conf.auto_max_age = 10
 iers.conf.auto_download = True
-#IERS_A_URL = 'ftp://ftp.iers.org/products/eop/rapid/standard/finals2000A.all'
-#iers.conf.iers_auto_url = IERS_A_URL
+# IERS_A_URL = 'ftp://ftp.iers.org/products/eop/rapid/standard/finals2000A.all'
+# iers.conf.iers_auto_url = IERS_A_URL
 iers.conf.remote_timeout = 60
 
-STATUS = {iers.FROM_IERS_B: 'IERS_B',
-          iers.FROM_IERS_A: 'IERS_A',
-          iers.FROM_IERS_A_PREDICTION: 'IERS_A',
-          iers.TIME_BEFORE_IERS_RANGE: 'OUT_OF_RANGE',
-          iers.TIME_BEYOND_IERS_RANGE: 'OUT_OF_RANGE'}
+STATUS = {
+    iers.FROM_IERS_B: "IERS_B",
+    iers.FROM_IERS_A: "IERS_A",
+    iers.FROM_IERS_A_PREDICTION: "IERS_A",
+    iers.TIME_BEFORE_IERS_RANGE: "OUT_OF_RANGE",
+    iers.TIME_BEYOND_IERS_RANGE: "OUT_OF_RANGE",
+}
 
 
 NOT_FROM_IERS_B = """\
@@ -66,7 +67,7 @@ def get_polar_motion(time, return_status=False):
 
     if np.any(status != iers.FROM_IERS_B):
         wmsg = NOT_FROM_IERS_B
-        warnings.warn(wmsg)
+        warnings.warn(wmsg, stacklevel=2)
 
     if return_status:
         status_new = [STATUS.get(e, e) for e in status.ravel()]

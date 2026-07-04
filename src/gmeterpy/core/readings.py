@@ -1,22 +1,19 @@
- #!/usr/bin/env python
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python
 
 import copy
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 import gmeterpy.units as u
 
 __all__ = ["Readings"]
 
+
 class Readings:
-    """Class to store and manipulate gravity readings.
+    """Class to store and manipulate gravity readings."""
 
-    """
-
-    def __init__(self, data=None, meta=None, units=None, corrections=None,
-            **kwargs):
+    def __init__(self, data=None, meta=None, units=None, corrections=None, **kwargs):
 
         if data is not None:
             self._data = data
@@ -31,12 +28,13 @@ class Readings:
         self._corrections = corrections
 
         if corrections is None:
-            self._corrections = {key: (key, {}) for key in self._data.columns
-                    if 'c_' in key}
+            self._corrections = {
+                key: (key, {}) for key in self._data.columns if "c_" in key
+            }
         else:
             self._corrections = corrections
 
-        self._proc = kwargs.pop('proc', {})
+        self._proc = kwargs.pop("proc", {})
 
         if units is None:
             self.units = {}
@@ -45,7 +43,7 @@ class Readings:
 
         if not self._data.empty:
             self._update_g_result()
-            self._data['jd'] = self._data.index.to_julian_date()
+            self._data["jd"] = self._data.index.to_julian_date()
 
     @property
     def data(self):
@@ -65,16 +63,12 @@ class Readings:
 
     @property
     def columns(self):
-        """Return all column labels in the data.
-
-        """
+        """Return all column labels in the data."""
         return list(self._data.columns.values)
 
     @property
     def index(self):
-        """Return index of the data.
-
-        """
+        """Return index of the data."""
         return self._data.index
 
     def copy(self):
@@ -111,31 +105,34 @@ class Readings:
 
     def mask(self, column, minv, maxv):
         cc = self._data[column]
-        c = ((cc <= minv) & (cc >= maxv))
+        c = (cc <= minv) & (cc >= maxv)
         self._data = self._data.mask(c)
         return self
 
-    def filter(self, minv, maxv, column='g_result', groupby=None):
+    def filter(self, minv, maxv, column="g_result", groupby=None):
         cc = self._data[column]
-        c = ((cc >= minv) & (cc <= maxv))
+        c = (cc >= minv) & (cc <= maxv)
         self._data = self._data[c]
         return self
 
     def split(self, *args, **kwargs):
         splitted = []
-        for n, group in self._data.groupby(*args, **kwargs):
+        for _n, group in self._data.groupby(*args, **kwargs):
             group_n = self.__class__(group.copy(), meta=self.meta)
             splitted.append(group_n)
         return splitted
 
     def truncate(self, by=None, before=0, after=0):
         data = self._data.reset_index()
-        data = data.groupby(by).apply(lambda x: x.iloc[before:(len(x) -
-                                                               after)]).reset_index(drop=True)
-        self._data = data.set_index('time')
+        data = (
+            data.groupby(by)
+            .apply(lambda x: x.iloc[before : (len(x) - after)])
+            .reset_index(drop=True)
+        )
+        self._data = data.set_index("time")
 
-        self._proc['truncate_before'] = before
-        self._proc['truncate_after'] = after
+        self._proc["truncate_before"] = before
+        self._proc["truncate_after"] = after
 
         return self
 
@@ -146,10 +143,10 @@ class Readings:
 
     def _update_correction(self, name):
         value, kwargs = copy.deepcopy(self._corrections[name])
-        if hasattr(value, '__call__'):
+        if callable(value):
             for key in kwargs:
                 if isinstance(kwargs[key], str) and hasattr(self.data, kwargs[key]):
-                    #kwargs[key] = getattr(self.data, kwargs[key]).copy()
+                    # kwargs[key] = getattr(self.data, kwargs[key]).copy()
                     kwargs[key] = self.quantity(kwargs[key])
             value = value(**kwargs)
 
@@ -173,7 +170,7 @@ class Readings:
         self._update_g_result()
 
     def _update_g_result(self):
-        self._data['g_result'] = self._data.g
+        self._data["g_result"] = self._data.g
         for key in self._corrections:
             self._update_correction(key)
             self._data.g_result += self.data[key]
@@ -181,33 +178,40 @@ class Readings:
     def interpolate_from_ts(self, ts):
         idx = pd.Series(index=self._data.index, dtype=np.float64)
         x = pd.concat([ts, idx])
-        val = x.groupby([x.index]).first().sort_index().interpolate(
-            method='time')[idx.index]
+        val = (
+            x.groupby([x.index])
+            .first()
+            .sort_index()
+            .interpolate(method="time")[idx.index]
+        )
         return pd.Series(val)
 
     def merge(self, to_merge):
         data = self._data.reset_index(drop=False)
-        data = pd.merge(data, to_merge, left_index=True, right_index=True,
-                        how='left')
-        self._data = data.set_index('time').sort_index()
+        data = pd.merge(data, to_merge, left_index=True, right_index=True, how="left")
+        self._data = data.set_index("time").sort_index()
         return self
 
-    def to_file(self, fname, before=[], after=[], **kwargs):
+    def to_file(self, fname, before=None, after=None, **kwargs):
         # TODO: New method __str__
+        if after is None:
+            after = []
+        if before is None:
+            before = []
         columns = before
-        columns.extend(['date', 'time', 'g'])
+        columns.extend(["date", "time", "g"])
         columns.extend(self.corrections.keys())
-        columns.extend(['g_result'])
+        columns.extend(["g_result"])
         columns.extend(after)
         data = self.data.copy()
-        data['date'] = data.index.date
-        data['time'] = data.index.time
+        data["date"] = data.index.date
+        data["time"] = data.index.time
         data = data.sort_index().reset_index(drop=True)
-        data = data.drop('jd', axis=1)
+        data = data.drop("jd", axis=1)
         columns.extend(data.drop(columns, axis=1).columns)
-        #pd.options.display.float_format = '{:.3f}'.format
-        #data['g_result'] = data.g_result.map('{:.4f}'.format)
-        #data['line'] = data.line.astype(str)
+        # pd.options.display.float_format = '{:.3f}'.format
+        # data['g_result'] = data.g_result.map('{:.4f}'.format)
+        # data['line'] = data.line.astype(str)
         data = data.to_string(index=False, columns=columns)
-        with open(fname, 'wt') as f:
-            f.write(data + '\n')
+        with open(fname, "w") as f:
+            f.write(data + "\n")

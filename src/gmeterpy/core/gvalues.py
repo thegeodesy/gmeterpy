@@ -1,11 +1,10 @@
 #!/usr/bin/env python
-# encoding: utf-8
 
 import numpy as np
 import pandas as pd
 
-import statsmodels.api as sm
 from gmeterpy.core.dmatrices import dmatrix_gravity_values
+
 
 class GravityValues:
     def __init__(self, data=None, meta=None):
@@ -26,9 +25,9 @@ class GravityValues:
         return GravityValues(df)
 
     def to_file(self, fname, **kwargs):
-        pd.options.display.float_format = '{:.4f}'.format
-        with open(fname, 'w') as f:
-            f.write(self.__str__(**kwargs) + '\n')
+        pd.options.display.float_format = "{:.4f}".format
+        with open(fname, "w") as f:
+            f.write(self.__str__(**kwargs) + "\n")
 
     def __str__(self, **kwargs):
         return self.data.to_string(**kwargs)
@@ -37,7 +36,7 @@ class GravityValues:
         return self.data.name.unique()
 
     def agmeters(self):
-        if hasattr(self.data, 'meter_sn'):
+        if hasattr(self.data, "meter_sn"):
             return self.data.meter_sn.unique()
         else:
             return np.array([])
