@@ -36,6 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest", "pytest-cov"]
+docs = ["sphinx>=8", "sphinx-rtd-theme>=2"]
 dev = [
   "build",
   "check-wheel-contents",
