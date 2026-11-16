@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+title: gMeterPy
+message: If you use this software, please cite it using these metadata.
+type: software
+authors:
+  - given-names: Ilya
+    family-names: Oshchepkov
+    orcid: 'https://orcid.org/0000-0002-1883-7242'
+repository-code: 'https://github.com/thegeodesy/gmeterpy'
+url: 'https://gmeterpy.readthedocs.io/'
+abstract: Python software for processing gravimeter measurements.
+keywords:
+  - geodesy
+  - gravimetry
+  - gravity
+license: MIT

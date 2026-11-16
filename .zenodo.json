@@ -1,0 +1,24 @@
+{
+  "title": "gMeterPy",
+  "upload_type": "software",
+  "description": "Processing gravimeter measurements in Python.",
+  "creators": [
+    {
+      "name": "Oshchepkov, Ilya",
+      "orcid": "0000-0002-1883-7242"
+    }
+  ],
+  "license": "MIT",
+  "keywords": [
+    "geodesy",
+    "gravimetry",
+    "gravity"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/thegeodesy/gmeterpy",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}

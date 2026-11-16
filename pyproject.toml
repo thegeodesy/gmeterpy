@@ -20,6 +20,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
   "Topic :: Scientific/Engineering",
 ]
 dependencies = [
@@ -40,11 +41,13 @@ docs = ["sphinx>=8", "sphinx-rtd-theme>=2"]
 dev = [
   "build",
   "check-wheel-contents",
+  "packaging",
   "pre-commit",
   "pytest",
   "pytest-cov",
   "ruff",
   "twine",
+  "uv",
 ]
 
 [project.scripts]
@@ -55,10 +58,10 @@ scx2 = "gmeterpy.cli.scx2:main"
 vgfit = "gmeterpy.cli.vgfit:main"
 
 [project.urls]
-Homepage = "https://github.com/opengrav/gmeterpy"
+Homepage = "https://github.com/thegeodesy/gmeterpy"
 Documentation = "https://gmeterpy.readthedocs.io/"
-Issues = "https://github.com/opengrav/gmeterpy/issues"
-Source = "https://github.com/opengrav/gmeterpy"
+Issues = "https://github.com/thegeodesy/gmeterpy/issues"
+Source = "https://github.com/thegeodesy/gmeterpy"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -67,7 +70,6 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools_scm]
-fallback_version = "0.0.0"
 
 [tool.pytest.ini_options]
 addopts = ["--cov=gmeterpy", "--cov-report=term-missing", "--cov-report=xml"]

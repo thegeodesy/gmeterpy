@@ -15,8 +15,9 @@ install the project in editable mode with its development tools:
 
 .. code:: bash
 
-    python -m venv .venv
-    .venv/bin/python -m pip install -e ".[dev]"
+    uv venv --python 3.15 .venv
+    source .venv/bin/activate
+    uv pip install --upgrade -e ".[dev,docs]"
     .venv/bin/pre-commit install
 
 Before submitting a change, run the same checks used by CI:
@@ -26,6 +27,7 @@ Before submitting a change, run the same checks used by CI:
     .venv/bin/ruff check .
     .venv/bin/ruff format --check .
     .venv/bin/pytest
+    .venv/bin/python -m sphinx -W --keep-going -b html docs docs/_build/html
     .venv/bin/python -m build
     .venv/bin/twine check --strict dist/*
     .venv/bin/check-wheel-contents dist/*.whl
@@ -40,7 +42,7 @@ Types of Contributions
 Report Bugs
 ~~~~~~~~~~~
 
-Report bugs at https://github.com/opengrav/gmeterpy/issues.
+Report bugs at https://github.com/thegeodesy/gmeterpy/issues.
 
 If you are reporting a bug, please include:
 
@@ -70,7 +72,7 @@ articles, and such.
 Submit Feedback
 ~~~~~~~~~~~~~~~
 
-The best way to send feedback is to file an issue at https://github.com/opengrav/gmeterpy/issues.
+The best way to send feedback is to file an issue at https://github.com/thegeodesy/gmeterpy/issues.
 
 If you are proposing a feature:
 
