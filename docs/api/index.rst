@@ -3,8 +3,6 @@
 API Reference
 =============
 
-.. currentmodule:: gmeterpy.corrections
-
 Gravity Corrections and Reductions
 ----------------------------------
 
@@ -13,4 +11,4 @@ Gravity Corrections and Reductions
 
    gmeterpy.corrections.atmosphere
    gmeterpy.corrections.polar_motion
-   gmeterpy.corrections.fsol
+   gmeterpy.meters.freefall.fsol
