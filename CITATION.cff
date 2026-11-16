@@ -7,7 +7,7 @@ authors:
     family-names: Oshchepkov
     orcid: 'https://orcid.org/0000-0002-1883-7242'
 repository-code: 'https://github.com/thegeodesy/gmeterpy'
-url: 'https://gmeterpy.readthedocs.io/'
+url: 'https://gmeterpy.thegeodesy.com'
 abstract: Python software for processing gravimeter measurements.
 keywords:
   - geodesy

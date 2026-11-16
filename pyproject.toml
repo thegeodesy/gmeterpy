@@ -59,7 +59,7 @@ vgfit = "gmeterpy.cli.vgfit:main"
 
 [project.urls]
 Homepage = "https://github.com/thegeodesy/gmeterpy"
-Documentation = "https://gmeterpy.readthedocs.io/"
+Documentation = "https://gmeterpy.thegeodesy.com"
 Issues = "https://github.com/thegeodesy/gmeterpy/issues"
 Source = "https://github.com/thegeodesy/gmeterpy"
 

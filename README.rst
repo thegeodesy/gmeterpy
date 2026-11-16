@@ -2,86 +2,68 @@
 gMeterPy
 ========
 
-.. image:: https://img.shields.io/pypi/v/gmeterpy.svg
-        :target: https://pypi.org/project/gmeterpy/
-        :alt: Latest version on PyPI
+.. image:: https://img.shields.io/pypi/v/gmeterpy
+   :target: https://pypi.org/project/gmeterpy/
+   :alt: PyPI version
 
-.. image:: https://github.com/thegeodesy/gmeterpy/actions/workflows/ci.yml/badge.svg
-        :target: https://github.com/thegeodesy/gmeterpy/actions/workflows/ci.yml
-        :alt: GitHub Actions build status
+.. image:: https://img.shields.io/pypi/pyversions/gmeterpy
+   :target: https://pypi.org/project/gmeterpy/
+   :alt: Python versions
 
-.. image:: https://img.shields.io/pypi/pyversions/gmeterpy.svg
-        :alt: Compatible Python versions
-        :target: https://pypi.org/project/gmeterpy/
+.. image:: https://img.shields.io/github/actions/workflow/status/thegeodesy/gmeterpy/ci.yml?branch=main
+   :target: https://github.com/thegeodesy/gmeterpy/actions
+   :alt: CI
 
-.. image:: https://readthedocs.org/projects/gmeterpy/badge/?version=latest
-        :target: https://gmeterpy.readthedocs.io/en/latest/?badge=latest
-        :alt: Documentation Status
+.. image:: https://app.readthedocs.org/projects/gmeterpy/badge/?version=latest
+   :target: https://gmeterpy.thegeodesy.com
+   :alt: Documentation status
 
+.. image:: https://img.shields.io/github/license/thegeodesy/gmeterpy
+   :target: https://github.com/thegeodesy/gmeterpy/blob/main/LICENSE.txt
+   :alt: License
 
-Gravity (small `g`) measurement data processing framework written in Python.
+Overview
+--------
 
-The goal of the gMeterPy is to create an open source software to process 
-raw data from all types of gravimeters.
+*gMeterPy* is a free and open-source Python library for processing measurement
+data from gravimeters used in gravity field surveys across geodesy, geophysics
+and other Earth and planetary sciences.
 
-**The project is under active development; APIs may change between releases.**
-
-About
------
-
-*gMeterPy* is an open source and free Python library for processing 
-measurement data from gravimeters, which are used for gravity field surveys 
-in geodesy, geophysics and other branches of Earth and planetary sciences. 
-The main intention is to go as deep as possible in processing **raw** data 
-from scratch, as well as to support all types of instruments, 
+Its goal is to process **raw** measurements from the ground up, with as much
+detail as possible, and to support all types of gravimeters,
 corrections, common file formats and processing procedures.
 
-Install
--------
+The project is under **active development**.
+APIs may change between minor versions.
 
-You will need **Python 3.12 or greater**.
+Installation
+------------
 
-Install the current source version:
-
-.. code:: bash
-
-    python -m pip install "git+https://github.com/thegeodesy/gmeterpy@main"
-
-Or clone the git repository locally and run:
+Install from PyPI:
 
 .. code:: bash
 
-    git clone https://github.com/thegeodesy/gmeterpy.git
-    cd gmeterpy
-    python -m pip install .
+   python -m pip install gmeterpy
 
-The latest compatible published release is available with
-``python -m pip install gmeterpy``. Published releases can differ from the
-current source in APIs, commands and Python requirements.
+Install the development version (Python 3.12 or newer):
 
-The current source installs ``gabl``, ``gphone``, ``loop``, ``scx2`` and
-``vgfit``. Run each command with ``--help`` to inspect its options.
+.. code:: bash
+
+   python -m pip install -U "git+https://github.com/thegeodesy/gmeterpy@main"
+
+Documentation
+-------------
+
+https://gmeterpy.thegeodesy.com
 
 Citation
 --------
 
-Citation metadata is available in ``CITATION.cff`` and through the repository's
-"Cite this repository" menu.
+If you use gMeterPy in academic work, please cite it.
 
-Contributing
-------------
-
-There are many ways you can contribute! Please read 
-`CONTRIBUTING.rst <https://github.com/thegeodesy/gmeterpy/blob/main/CONTRIBUTING.rst>`__
-to see how you can help and give feedback.
-
-Please note also that *gMeterPy* is released with a Code of Conduct 
-(see `CODE_OF_CONDUCT.md <https://github.com/thegeodesy/gmeterpy/blob/main/CODE_OF_CONDUCT.md>`__).
-By participating in this project you agree that you will follow all its terms.
+Citation metadata is available in ``CITATION.cff``.
 
 License
 -------
 
-This project is licensed under the MIT license. 
-Please see `LICENSE.txt <https://github.com/thegeodesy/gmeterpy/blob/main/LICENSE.txt>`__
-for details.
+MIT License.

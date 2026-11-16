@@ -10,7 +10,6 @@ Welcome to gMeterPy's documentation!
    install.rst
    user_guide.rst
    api/index.rst
-   contributing.rst
    development.rst
    releasing.rst
 
