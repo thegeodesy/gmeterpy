@@ -46,6 +46,11 @@ lint, documentation, all supported Python versions and both installed
 artifacts. Coverage and rendered documentation are retained as run artifacts.
 The Release workflow reuses these same checks before publishing.
 
+The CI workflow uploads the Python 3.15 coverage report to Codecov in a separate,
+non-blocking job. Overall and changed-line coverage checks are informational
+while the project establishes a baseline. Upload failures remain visible in the
+job log but do not block development or publishing.
+
 Read the Docs uses the root ``.readthedocs.yaml``. Repository, default branch
 and webhook settings must also match the project; see the release guide for
 account setup.

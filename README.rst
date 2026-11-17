@@ -14,6 +14,10 @@ gMeterPy
    :target: https://github.com/thegeodesy/gmeterpy/actions
    :alt: CI
 
+.. image:: https://codecov.io/gh/thegeodesy/gmeterpy/branch/main/graph/badge.svg
+   :target: https://app.codecov.io/gh/thegeodesy/gmeterpy/tree/main
+   :alt: Test coverage
+
 .. image:: https://app.readthedocs.org/projects/gmeterpy/badge/?version=latest
    :target: https://gmeterpy.thegeodesy.com
    :alt: Documentation status
