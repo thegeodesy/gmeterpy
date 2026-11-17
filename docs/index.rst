@@ -1,6 +1,3 @@
-Welcome to gMeterPy's documentation!
-====================================
-
 .. include:: ../README.rst
 
 .. toctree::
@@ -15,7 +12,7 @@ Welcome to gMeterPy's documentation!
 
 
 Indices and tables
-==================
+------------------
 
 * :ref:`genindex`
 * :ref:`modindex`

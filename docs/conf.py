@@ -21,7 +21,7 @@ import gmeterpy
 # -- Project information -----------------------------------------------------
 
 project = "gMeterPy"
-copyright = "2019, Ilya Oshchepkov"
+copyright = "2019-2026, Ilya Oshchepkov"
 author = "Ilya Oshchepkov"
 
 # The short X.Y version
@@ -88,6 +88,14 @@ pygments_style = "sphinx"
 # a list of builtin themes.
 #
 html_theme = "furo"
+html_title = "gMeterPy documentation"
+html_short_title = "gMeterPy"
+html_theme_options = {
+    "announcement": (
+        "This documentation is a work in progress and may be incomplete "
+        "or change as it is being written."
+    ),
+}
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -161,7 +169,7 @@ texinfo_documents = [
         "gMeterPy Documentation",
         author,
         "gMeterPy",
-        "One line description of project.",
+        "Processing raw gravimeter measurements in Python.",
         "Miscellaneous",
     ),
 ]

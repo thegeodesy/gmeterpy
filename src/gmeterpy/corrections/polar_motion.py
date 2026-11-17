@@ -55,7 +55,7 @@ def get_polar_motion(time, return_status=False):
     xp, yp : ~astropy.units.Quantity
         Polar motion coordinates, in arcsec.
     status : str or list
-        Status values (if `return_status`=`True`):
+        Status values (if ``return_status=True``):
 
         * 'IERS_B' pole coordinates are from IERS Bulletin B (final).
         * 'IERS_A' pole coordinates are from IERS Bulletin A (preliminary).
@@ -116,7 +116,7 @@ def polar_motion_correction(xp, yp, lat, lon, radius=6378136 * u.m, delta=1.164)
 
     where :math:`x_p,y_p` -- pole coordinates,
     :math:`\omega` -- mean angular velocity,
-    :math:`r = a = 6 378 136` [m] -- equatirial radius of the Earth,
+    :math:`r = a = 6 378 136` [m] -- equatorial radius of the Earth,
     :math:`\phi,\lambda` -- geocentric coordinates of the station,
     :math:`\delta = 1.164` -- is the amplitude factor for
     the elastic response of the Earth.
