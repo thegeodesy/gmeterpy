@@ -2,6 +2,7 @@ cff-version: 1.2.0
 title: gMeterPy
 message: If you use this software, please cite it using these metadata.
 type: software
+doi: 10.5281/zenodo.24301038
 authors:
   - given-names: Ilya
     family-names: Oshchepkov

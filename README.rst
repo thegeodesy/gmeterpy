@@ -26,6 +26,10 @@ gMeterPy
    :target: https://github.com/thegeodesy/gmeterpy/blob/main/LICENSE.txt
    :alt: License
 
+.. image:: https://zenodo.org/badge/DOI/10.5281/zenodo.24301038.svg
+   :target: https://doi.org/10.5281/zenodo.24301038
+   :alt: DOI
+
 Overview
 --------
 
@@ -66,6 +70,10 @@ Citation
 If you use gMeterPy in academic work, please cite it.
 
 Citation metadata is available in ``CITATION.cff``.
+
+The `concept DOI <https://doi.org/10.5281/zenodo.24301038>`_ represents all
+releases. To cite the exact software used in your work, use the version-specific
+DOI from the corresponding Zenodo record.
 
 License
 -------
