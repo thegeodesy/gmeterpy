@@ -4,8 +4,10 @@ Test atmospheric pressure correction.
 """
 
 import numpy as np
+import pytest
 from astropy.time import Time
 from astropy.utils import iers
+from erfa import ErfaWarning
 
 import gmeterpy.corrections.polar_motion as pm
 import gmeterpy.units as u
@@ -30,7 +32,10 @@ def test_get_polar_motion(monkeypatch):
     np.testing.assert_array_equal(pm_xy_without_status[1], pm_xy[1])
 
     # Out of range
-    _, _, status = pm.get_polar_motion(Time("2100-01-01"), return_status=True)
+    with pytest.warns(ErfaWarning, match="dubious year"):
+        future_time = Time("2100-01-01")
+    with pytest.warns(UserWarning, match="Some pole coordinates are not from IERS"):
+        _, _, status = pm.get_polar_motion(future_time, return_status=True)
     assert status[0] == "OUT_OF_RANGE"
 
 
