@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 """Module containing parsers for PROLET program for earth tides predictions"""
 
 import io

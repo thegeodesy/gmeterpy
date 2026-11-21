@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 from typing import ClassVar
 
 from gmeterpy.core.readings import Readings

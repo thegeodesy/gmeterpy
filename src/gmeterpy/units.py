@@ -11,14 +11,38 @@ defined.
 """
 
 from astropy.units import *
-from astropy.units import cds
+from astropy.units import (
+    Quantity as Quantity,
+    Unit as Unit,
+    UnitBase as UnitBase,
+    UnitsError as UnitsError,
+    cds as cds,
+    def_unit as def_unit,
+    dimensionless_angles as dimensionless_angles,
+    quantity_input as quantity_input,
+)
 
+# Astropy creates unit symbols dynamically. Declare the common ones for editors.
+m = Unit("m")
+mm = Unit("mm")
+cm = Unit("cm")
+km = Unit("km")
+s = Unit("s")
+Gal = Unit("Gal")
+mGal = Unit("mGal")
+uGal = Unit("uGal")
+Pa = Unit("Pa")
+mbar = Unit("mbar")
+deg_C = Unit("deg_C")
+rad = Unit("rad")
+deg = Unit("deg")
+arcsec = Unit("arcsec")
 
-# define namespace
-def_unit(
+E = def_unit(
     ["E", "Eotvos"],
     represents=1e-9 * s**-2,
     doc="Eötvös-unit for the gravity gradient.",
     prefixes=True,
     namespace=globals(),
 )
+Eotvos = E

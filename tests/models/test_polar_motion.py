@@ -9,7 +9,7 @@ from astropy.time import Time
 from astropy.utils import iers
 from erfa import ErfaWarning
 
-import gmeterpy.corrections.polar_motion as pm
+import gmeterpy.models.polar_motion as pm
 import gmeterpy.units as u
 
 

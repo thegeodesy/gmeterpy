@@ -4,12 +4,14 @@ This module contains the atmospheric correction to the gravity observations.
 
 """
 
+from typing import cast
+
 import gmeterpy.constants as c
 import gmeterpy.units as u
 
 
-@u.quantity_input
-def normal_pressure(height: u.m) -> u.Pa:
+@u.quantity_input(height=u.m)
+def normal_pressure(height: u.Quantity) -> u.Quantity:
     r"""Normal atmospheric pressure.
 
     Parameters
@@ -41,15 +43,16 @@ def normal_pressure(height: u.m) -> u.Pa:
 
     """
     # pn = 101325 * (1 - 0.0065 * height / 288.15) ** 5.2559
-    pn = c.p0 * (1 - c.L * height / c.Tn) ** (c.gn * c.M / c.R / c.L).round(4)
+    temperature_ratio = cast(u.Quantity, 1 - c.L * height / c.Tn)
+    exponent = cast(u.Quantity, (c.gn * c.M / c.R / c.L).round(4))
+    pressure = cast(u.Quantity, c.p0 * temperature_ratio**exponent)
+    return pressure.to(u.Pa)
 
-    return pn
 
-
-@u.quantity_input
+@u.quantity_input(height=u.m, pressure=u.Pa, barometric_factor=u.uGal / u.mbar)
 def atmospheric_pressure_correction(
-    height: u.m, pressure: u.Pa, barometric_factor: u.uGal / u.mbar = c.atm_sens
-) -> u.uGal:
+    height: u.Quantity, pressure: u.Quantity, barometric_factor: u.Quantity = c.atm_sens
+) -> u.Quantity:
     r"""Atmospheric pressure correction.
 
     Parameters
@@ -80,12 +83,12 @@ def atmospheric_pressure_correction(
 
     where :math:`p_a` -- actual observed air pressure,
     :math:`p_n` -- normal pressure calculated by
-    `gmeterpy.corrections.atmosphere.normal_pressure` function,
+    `gmeterpy.models.atmosphere.normal_pressure` function,
     0.3 uGal / mBar -- default barometric factor.
 
     The actual value of :math:`p_n` needs to be documented.
 
     """
     delta_p = pressure - normal_pressure(height)
-    delta_g_atm = barometric_factor * delta_p
-    return delta_g_atm
+    delta_g_atm = cast(u.Quantity, barometric_factor * delta_p)
+    return delta_g_atm.to(u.uGal)

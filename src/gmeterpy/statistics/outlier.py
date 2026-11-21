@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+"""Tests for detecting outliers."""
 
 import numpy as np
 from scipy.stats import t
@@ -36,8 +36,3 @@ def tau_outlier_test(x, scale=1.0, alpha=0.05):
     tau_half_alpha = t_half_alpha * np.sqrt(dof)
     tau_half_alpha /= np.sqrt(dof - 1 + t_half_alpha**2)
     return np.abs(x) / scale <= tau_half_alpha
-
-
-def rms(x):
-    """Return root mean square"""
-    return np.sqrt(np.mean(x**2))

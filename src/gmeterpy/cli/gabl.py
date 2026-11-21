@@ -6,9 +6,9 @@ import argparse
 import configparser
 import os
 
-from gmeterpy.corrections import get_polar_motion
-from gmeterpy.corrections.tides.prolet import prolet
 from gmeterpy.meters.gabl.core import GABLProject
+from gmeterpy.models import get_polar_motion
+from gmeterpy.models.tides.prolet import prolet
 
 
 def main():

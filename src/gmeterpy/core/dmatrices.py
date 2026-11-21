@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import numpy as np
 from pandas import DataFrame, concat, get_dummies
 from scipy.linalg import block_diag

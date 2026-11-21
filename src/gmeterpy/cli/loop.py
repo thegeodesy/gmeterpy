@@ -9,11 +9,11 @@ import numpy as np
 import pandas as pd
 
 from gmeterpy.core.relative import RelativeReadings
-from gmeterpy.corrections.atmosphere import atmospheric_pressure_correction
-from gmeterpy.corrections.tides.prolet import prolet
-from gmeterpy.corrections.tides.tamura import tide
+from gmeterpy.models.atmosphere import atmospheric_pressure_correction
+from gmeterpy.models.tides.prolet import prolet
+from gmeterpy.models.tides.tamura import tide
 from gmeterpy.plotting.relative import plot_loop_processing
-from gmeterpy.stats import interpolate
+from gmeterpy.statistics import interpolate
 
 
 def main():

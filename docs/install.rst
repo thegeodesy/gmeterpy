@@ -10,6 +10,10 @@ The current source requires Python 3.12 or newer. Install it with::
 
     python -m pip install "git+https://github.com/thegeodesy/gmeterpy@main"
 
+To add the current source as a dependency in an existing uv project::
+
+    uv add "gmeterpy @ git+https://github.com/thegeodesy/gmeterpy@main"
+
 To work from an editable checkout::
 
     git clone https://github.com/thegeodesy/gmeterpy.git
@@ -24,6 +28,17 @@ Published releases
 Install the latest compatible release from PyPI with::
 
     python -m pip install gmeterpy
+
+To add the PyPI release to an existing uv project::
+
+    uv add gmeterpy
+
+For a standalone virtual environment managed by uv::
+
+    uv venv
+    uv pip install gmeterpy
+
+Activate the environment to use the installed commands.
 
 Published releases can differ from the current source in supported Python
 versions, APIs and available commands.
@@ -63,5 +78,5 @@ and webhook settings still need to be configured in the documentation service.
 Dependencies
 ------------
 
-Runtime dependencies are declared in ``pyproject.toml`` and installed by pip.
+Runtime dependencies are declared in ``pyproject.toml`` and installed by pip or uv.
 They include NumPy, SciPy, pandas, Matplotlib and Astropy.

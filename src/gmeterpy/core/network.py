@@ -1,16 +1,15 @@
-#!/usr/bin/env python
-
 from copy import deepcopy
 
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
-from gmeterpy.core.adjustment import AdjustmentResults
 from gmeterpy.core.dmatrices import dmatrix_dummy, dmvstack
 from gmeterpy.core.gvalues import GravityValues
 from gmeterpy.core.relative import RelativeReadings, Ties
-from gmeterpy.stats import rms, tau_outlier_test
+from gmeterpy.statistics import rms
+from gmeterpy.statistics.outlier import tau_outlier_test
+from gmeterpy.statistics.results import FitResults
 
 
 class Network:
@@ -125,22 +124,22 @@ class Network:
 
         self._method = method
 
-        return AdjustmentResults(self, model.fit())
+        return FitResults(model.fit(), model=self)
 
 
-class NetworkAdjustmentResults(AdjustmentResults):
+class NetworkAdjustmentResults(FitResults):
     def __init__(self, model, results):
 
-        super().__init__(model, results)
+        super().__init__(results, model=model)
 
     def ties(self):
         data = self.model.ties.data.copy()
-        data["weight"] = self.res.model.weights[: len(data)]
-        data["resid"] = self.res.resid.iloc[: len(data)].values
+        data["weight"] = self.regression.model.weights[: len(data)]
+        data["resid"] = self.residuals.iloc[: len(data)].values
 
         if self.model._method in ("OLS", "WLS"):
-            tau_passed = tau_outlier_test(self.res.wresid.values, scale=self.s0)
-            data["stresid"] = self.res.wresid.iloc[: len(data)].values
+            tau_passed = tau_outlier_test(self.whitened_residuals.values, scale=self.s0)
+            data["stresid"] = self.whitened_residuals.iloc[: len(data)].values
             # data['tau_passed'] = tau_outlier_test(data.stresid, scale=self.s0)
             data["tau_passed"] = tau_passed[: len(data)]
 
@@ -165,17 +164,17 @@ class NetworkAdjustmentResults(AdjustmentResults):
             idx_l = -len(fix_data)
             idx_r = None
 
-        # fix_data['resid'] = self.res.resid.iloc[-len(fix_data):].values
-        fix_data["resid"] = self.res.resid.iloc[idx_l:idx_r].values
+        # fix_data['resid'] = self.residuals.iloc[-len(fix_data):].values
+        fix_data["resid"] = self.residuals.iloc[idx_l:idx_r].values
         if self.model in ("OLS", "WLS"):
-            tau_passed = tau_outlier_test(self.res.wresid.values, scale=self.s0)
-            fix_data["stresid"] = self.res.wresid.iloc[idx_l:idx_r].values
+            tau_passed = tau_outlier_test(self.whitened_residuals.values, scale=self.s0)
+            fix_data["stresid"] = self.whitened_residuals.iloc[idx_l:idx_r].values
             # fix_data['tau_passed'] = tau_outlier_test(fix_data.stresid.values, scale=self.s0)
             fix_data["tau_passed"] = tau_passed[idx_l:idx_r]
 
         # fix_data['resid'] = fix_data.g - fix_data.adj
-        # fix_data['weight'] = self.res.model.weights[-len(fix_data):]
-        fix_data["weight"] = self.res.model.weights[idx_l:idx_r]
+        # fix_data['weight'] = self.regression.model.weights[-len(fix_data):]
+        fix_data["weight"] = self.regression.model.weights[idx_l:idx_r]
         fix_data["u_adj"] = self.sigma.loc[self.model.fix_stations.stations()]
         fix_data["En"] = (
             fix_data.resid.abs() / np.sqrt(fix_data.stdev**2 + fix_data.u_adj**2)
@@ -236,9 +235,9 @@ class NetworkAdjustmentResults(AdjustmentResults):
         for i, s1 in enumerate(st):
             for s2 in st[i + 1 :]:
                 delta_g = self.params[s2] - self.params[s1]
-                var1 = self.res.cov_params()[s1][s1]
-                var2 = self.res.cov_params()[s2][s2]
-                cov = self.res.cov_params()[s1][s2]
+                var1 = self.regression.cov_params()[s1][s1]
+                var2 = self.regression.cov_params()[s2][s2]
+                cov = self.regression.cov_params()[s1][s2]
                 u = np.sqrt(var1 + var2 - 2 * cov)
                 adj_tie = pd.Series(
                     {"from": s1, "to": s2, "delta_g": delta_g, "stdev": u}
@@ -292,9 +291,9 @@ class NetworkAdjustmentResults(AdjustmentResults):
             f.write(self.calibration().to_string() + "\n")
         with open("adjreport.txt", "w") as f:
             f.write("Mean epoch: " + str(epoch))
-            n = self.res.nobs
-            k = self.res.df_model
-            r = self.res.df_resid
+            n = self.regression.nobs
+            k = self.regression.df_model
+            r = self.regression.df_resid
             f.write(
                 f"\nObservations: {n:.0f}\nUnknowns: {k:.0f}\nDegrees of freedom: {r:.0f}\n"
             )
@@ -398,8 +397,8 @@ class NetworkAdjustmentResults(AdjustmentResults):
 
         with open("cov.txt", "w") as f:
             pd.options.display.float_format = "{:.8E}".format
-            f.write(self.res.cov_params().to_string(index=True))
+            f.write(self.regression.cov_params().to_string(index=True))
 
         with open("residuals.txt", "w") as f:
             pd.options.display.float_format = "{:.4f}".format
-            f.write(self.res.resid.to_string(index=False))
+            f.write(self.residuals.to_string(index=False))

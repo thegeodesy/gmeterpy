@@ -8,7 +8,7 @@ import os
 import numpy as np
 
 import gmeterpy.units as u
-from gmeterpy.corrections.atmosphere import (
+from gmeterpy.models.atmosphere import (
     atmospheric_pressure_correction,
     normal_pressure,
 )

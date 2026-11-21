@@ -3,12 +3,29 @@
 API Reference
 =============
 
-Gravity Corrections and Reductions
-----------------------------------
+Gravity Models
+--------------
 
 .. autosummary::
    :toctree: _autosummary
 
-   gmeterpy.corrections.atmosphere
-   gmeterpy.corrections.polar_motion
+   gmeterpy.models.atmosphere
+   gmeterpy.models.polar_motion
+   gmeterpy.models.vgrad
    gmeterpy.meters.freefall.fsol
+
+Regression Results
+------------------
+
+.. autosummary::
+   :toctree: _autosummary
+
+   gmeterpy.statistics.results
+
+Outlier Tests
+-------------
+
+.. autosummary::
+   :toctree: _autosummary
+
+   gmeterpy.statistics.outlier

@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import datetime
 from copy import deepcopy
 
@@ -9,9 +7,9 @@ import pandas as pd
 import statsmodels.api as sm
 from scipy.cluster.vq import kmeans, vq, whiten
 
-from gmeterpy.core.adjustment import AdjustmentResults
 from gmeterpy.core.dmatrices import dmatrix_relative_gravity_readings, dmatrix_ties
 from gmeterpy.core.readings import Readings
+from gmeterpy.statistics.results import FitResults
 
 
 def _closures(df, root=None):
@@ -168,10 +166,10 @@ class RelativeReadings(Readings):
         return RelativeReadingsResults(self, res)
 
 
-class RelativeReadingsResults(AdjustmentResults):
+class RelativeReadingsResults(FitResults):
     def __init__(self, readings, results):
 
-        super().__init__(readings, results)
+        super().__init__(results, model=readings)
 
         self.readings = self.model
 
@@ -183,13 +181,13 @@ class RelativeReadingsResults(AdjustmentResults):
 
         # self.readings._data['c_drift'] = np.around(
         # self.drift(self.readings.data.dt0), 4)
-        # self.readings._data['resid'] = self.res.resid.values
-        # self.readings._data['weights'] = self.res.weights.values
+        # self.readings._data['resid'] = self.residuals.values
+        # self.readings._data['weights'] = self.regression.weights.values
 
     def drift(self):
-        self.res.params[self.res.params.index.str.startswith("drift")]
+        self.regression.params[self.regression.params.index.str.startswith("drift")]
 
-        coefs = np.append(self.res.params[-self.order :][::-1], 0)
+        coefs = np.append(self.regression.params[-self.order :][::-1], 0)
         return -np.poly1d(coefs, variable="t")
 
     def has_ties(self):
@@ -206,7 +204,10 @@ class RelativeReadingsResults(AdjustmentResults):
             return Ties()
 
         adjg = pd.DataFrame(
-            {"g": self.res.params[stations], "stdev": self.res.bse[stations]}
+            {
+                "g": self.regression.params[stations],
+                "stdev": self.regression.bse[stations],
+            }
         )
         if sort:
             if isinstance(sort, bool):
@@ -250,9 +251,9 @@ class RelativeReadingsResults(AdjustmentResults):
             name1 = row["from"]
             name2 = row["to"]
 
-            var1 = self.res.bse[name1] ** 2
-            var2 = self.res.bse[name2] ** 2
-            covar = self.res.cov_params()[name1][name2]
+            var1 = self.regression.bse[name1] ** 2
+            var2 = self.regression.bse[name2] ** 2
+            covar = self.regression.cov_params()[name1][name2]
             stdev = np.sqrt(var1 + var2 - 2 * covar)
 
             ties.loc[index, "stdev"] = stdev
@@ -271,13 +272,13 @@ class RelativeReadingsResults(AdjustmentResults):
         out += "\nTruncate@end: "
         out += str(self.readings._proc["truncate_after"]) + "\n"
 
-        out += self.res.summary2().tables[0].to_string(index=False, header=False)
+        out += self.regression.summary2().tables[0].to_string(index=False, header=False)
 
         out += "\n== Results ==\n"
-        out += self.res.summary2().tables[1].iloc[:, :2].to_string()
+        out += self.regression.summary2().tables[1].iloc[:, :2].to_string()
         out += "\n== Covariance matrix ==\n"
         pd.options.display.float_format = "{:.4E}".format
-        out += self.res.cov_params().to_string()
+        out += self.regression.cov_params().to_string()
 
         return out
 

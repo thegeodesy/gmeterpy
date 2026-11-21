@@ -1,12 +1,10 @@
-#!/usr/bin/env python
-
 import matplotlib.dates as dates
 import matplotlib.pylab as plt
 import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
 
-from gmeterpy.stats import rms
+from gmeterpy.statistics import rms
 
 
 def autocorrelation_plot(series, ax=None, **kwds):
