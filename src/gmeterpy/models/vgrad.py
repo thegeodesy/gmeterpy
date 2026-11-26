@@ -16,7 +16,7 @@ from numpy.polynomial.polynomial import polyder, polyint, polyval, polyvander
 from numpy.typing import ArrayLike, NDArray
 
 import gmeterpy.units as u
-from gmeterpy.statistics.results import FitResults
+from gmeterpy.numerics.statistics.results import FitResults
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure

@@ -20,7 +20,7 @@ Regression Results
 .. autosummary::
    :toctree: _autosummary
 
-   gmeterpy.statistics.results
+   gmeterpy.numerics.statistics.results
 
 Outlier Tests
 -------------
@@ -28,4 +28,4 @@ Outlier Tests
 .. autosummary::
    :toctree: _autosummary
 
-   gmeterpy.statistics.outlier
+   gmeterpy.numerics.statistics.outlier

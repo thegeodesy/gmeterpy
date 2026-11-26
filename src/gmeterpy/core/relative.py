@@ -9,7 +9,7 @@ from scipy.cluster.vq import kmeans, vq, whiten
 
 from gmeterpy.core.dmatrices import dmatrix_relative_gravity_readings, dmatrix_ties
 from gmeterpy.core.readings import Readings
-from gmeterpy.statistics.results import FitResults
+from gmeterpy.numerics.statistics.results import FitResults
 
 
 def _closures(df, root=None):

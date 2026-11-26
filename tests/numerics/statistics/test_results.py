@@ -10,7 +10,7 @@ from statsmodels.api import OLS, RLM, WLS
 
 from gmeterpy.core.network import NetworkAdjustmentResults
 from gmeterpy.core.relative import RelativeReadingsResults
-from gmeterpy.statistics import FitResults
+from gmeterpy.numerics.statistics import FitResults
 
 
 def test_shared_parameter_search_and_diagnostic_plots():

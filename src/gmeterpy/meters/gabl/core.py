@@ -11,8 +11,8 @@ from gmeterpy.models import (
     atmospheric_pressure_correction,
     polar_motion_correction,
 )
+from gmeterpy.numerics.statistics.funcs import t_statistics
 from gmeterpy.plotting.absolute import plot_residuals
-from gmeterpy.statistics.funcs import t_statistics
 
 _formatters = {
     "doy": "{:.0f}".format,

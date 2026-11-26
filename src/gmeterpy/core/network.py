@@ -7,9 +7,9 @@ import statsmodels.api as sm
 from gmeterpy.core.dmatrices import dmatrix_dummy, dmvstack
 from gmeterpy.core.gvalues import GravityValues
 from gmeterpy.core.relative import RelativeReadings, Ties
-from gmeterpy.statistics import rms
-from gmeterpy.statistics.outlier import tau_outlier_test
-from gmeterpy.statistics.results import FitResults
+from gmeterpy.numerics.statistics import rms
+from gmeterpy.numerics.statistics.outlier import tau_outlier_test
+from gmeterpy.numerics.statistics.results import FitResults
 
 
 class Network:

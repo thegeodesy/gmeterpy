@@ -12,8 +12,8 @@ from gmeterpy.core.relative import RelativeReadings
 from gmeterpy.models.atmosphere import atmospheric_pressure_correction
 from gmeterpy.models.tides.prolet import prolet
 from gmeterpy.models.tides.tamura import tide
+from gmeterpy.numerics.interpolate import interpolate
 from gmeterpy.plotting.relative import plot_loop_processing
-from gmeterpy.statistics import interpolate
 
 
 def main():

@@ -4,7 +4,7 @@ import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
 
-from gmeterpy.statistics import rms
+from gmeterpy.numerics.statistics import rms
 
 
 def autocorrelation_plot(series, ax=None, **kwds):
