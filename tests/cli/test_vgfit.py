@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from gmeterpy.cli.vgfit import main
-from gmeterpy.models.vgrad import PolynomialVerticalGravityFitResults
+from gmeterpy.models.vgrad import FloatingGravityFitResults
 
 
 @pytest.mark.parametrize("station", ["", "Sochi"])
@@ -33,7 +33,7 @@ def test_main_writes_station_outputs(tmp_path, monkeypatch, station):
 @pytest.mark.parametrize("detrend", [["--subtract-gradient", "-300"], ["--no-detrend"]])
 def test_plot_options(tmp_path, monkeypatch, detrend):
     source = Path(__file__).resolve().parents[2] / "examples/vgfit/sochi.csv"
-    plot = PolynomialVerticalGravityFitResults.plot
+    plot = FloatingGravityFitResults.plot
     figures = []
 
     def capture_plot(result, *args, **kwargs):
@@ -42,7 +42,7 @@ def test_plot_options(tmp_path, monkeypatch, detrend):
         figures.append(figure)
         return figure
 
-    monkeypatch.setattr(PolynomialVerticalGravityFitResults, "plot", capture_plot)
+    monkeypatch.setattr(FloatingGravityFitResults, "plot", capture_plot)
     main(
         [
             "-i",
@@ -127,14 +127,14 @@ def test_automatic_detrending(tmp_path, monkeypatch, base_mm, expected_gradient)
     data = pd.concat([data, data.assign(runn=2)], ignore_index=True)
     source = tmp_path / "ties.csv"
     data.to_csv(source, index=False)
-    plot = PolynomialVerticalGravityFitResults.plot
+    plot = FloatingGravityFitResults.plot
     gradients = []
 
     def capture_plot(result, *args, **kwargs):
         gradients.append(kwargs["subtract_gradient"])
         return plot(result, *args, **kwargs)
 
-    monkeypatch.setattr(PolynomialVerticalGravityFitResults, "plot", capture_plot)
+    monkeypatch.setattr(FloatingGravityFitResults, "plot", capture_plot)
     with np.errstate(divide="raise", invalid="raise"):
         main(["-i", str(source), "-o", str(tmp_path)])
     assert gradients == pytest.approx([expected_gradient])

@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 import gmeterpy.units as u
-from gmeterpy.models.vgrad import PolynomialVerticalGravity
+from gmeterpy.models.vgrad.floating import FloatingGravityFit
 
 
 def main(argv=None):
@@ -101,12 +101,11 @@ def main(argv=None):
     except OSError as error:
         parser.error(str(error))
 
-    result = PolynomialVerticalGravity.fit_gravity_differences(
+    result = FloatingGravityFit(degree=args.degree).fit(
         data.level_1.to_numpy(dtype=float) / 1000 * u.m,
         data.level_2.to_numpy(dtype=float) / 1000 * u.m,
         data.delta_g.to_numpy(dtype=float) * u.uGal,
         set_ids=data.runn,
-        degree=args.degree,
     )
     gradient = args.subtract_gradient
     if args.no_detrend:

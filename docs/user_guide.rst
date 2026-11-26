@@ -164,14 +164,14 @@ The model fits measured gravity differences between reference and target heights
 .. code-block:: python
 
    from gmeterpy import units as u
-   from gmeterpy.models import PolynomialVerticalGravity
+   from gmeterpy.models.vgrad.floating import FloatingGravityFit
 
-   results = PolynomialVerticalGravity.fit_gravity_differences(
+   fitter = FloatingGravityFit(degree=2)
+   results = fitter.fit(
        h1=[0, 0, 0] * u.m,
        h2=[0.5, 1.0, 1.5] * u.m,
        delta_g=[-147, -288, -423] * u.uGal,
        set_ids=[1, 1, 1],
-       degree=2,
    )
    model = results.fitted_model
    gravity_changes, gravity_uncertainty = model.gravity([0.5, 1.0] * u.m)
@@ -192,12 +192,13 @@ and run offsets must be identifiable, and the adjustment needs residual
 degrees of freedom to estimate uncertainty.
 
 The CLI reads the tie CSV and passes its heights and differences to
-``fit_gravity_differences()``.
+``FloatingGravityFit.fit()``. Reuse the fitter to apply the same degree to
+several datasets.
 
-``PolynomialVerticalGravityFitResults`` lives alongside the model in
-``gmeterpy.models.vgrad``. It owns one fitted model, a snapshot of prepared
-observations, and regression diagnostics. It also provides ``plot`` and ``report`` methods. The former ``gravity_model`` alias and model-calculation shortcuts
-on the result have been removed; use ``results.fitted_model`` explicitly.
+The fitted polynomial, regression diagnostics, and ``prediction_table(h1, h2)``
+are available on ``PolynomialVerticalGravityFitResults``. The Mäkinen fit
+returns ``FloatingGravityFitResults``, which also provides the prepared floating
+observations and the ``plot()`` and ``report()`` methods.
 
 ``results.observations`` contains heights in metres, gravity in microgals, set
 identifiers in ``set_ids``, and geodetic residuals (fitted minus observed).
@@ -216,13 +217,10 @@ array in ascending power order, including the off-diagonal terms.
 interval endpoints or a pair ordered as ``(h1, h2)``.
 
 ``transfer_gravity()`` uses separate ``reference_height_uncertainty`` and
-``target_height_uncertainty`` keywords. To store a reference height
-uncertainty for use by ``gravity()``, ``mean_gravity()``, and
-``potential_difference()``, pass ``reference_height_uncertainty`` when
-constructing or anchoring the model. You can also pass it alongside an
-explicit reference in ``potential_difference()``. Omitted uncertainties
-are treated as zero. Height errors are assumed uncorrelated and independent
-of the fit and reference gravity.
+``target_height_uncertainty`` keywords. ``potential_difference()`` also
+accepts ``reference_height_uncertainty`` alongside a supplied reference.
+Omitted uncertainties are treated as zero. Height errors are assumed
+uncorrelated and independent of the fit and reference gravity.
 
 Observations, parameters, standard errors, residuals, and covariance tables
 are returned as independent copies. The fitted model is constructed once;
@@ -230,7 +228,7 @@ its public coefficients and covariance are also copies. The underlying
 ``results.regression`` object is shared for read-only inspection and retains
 statsmodels' native observed-minus-fitted residual convention.
 
-Diagnostics are inherited from ``gmeterpy.statistics.FitResults``:
+Diagnostics are inherited from ``gmeterpy.numerics.statistics.FitResults``:
 ``params``, ``sigma``, ``residuals``, ``whitened_residuals``,
 ``parameter_covariance``, ``number_of_observations``, ``number_of_unknowns``,
 ``degrees_of_freedom`` and ``s0``. Parameter counts include constants, and
@@ -239,6 +237,8 @@ residual degrees of freedom are determined by the backend model rank.
 Models can also be created directly from published coefficients:
 
 .. code-block:: python
+
+   from gmeterpy.models import PolynomialVerticalGravity
 
    model = PolynomialVerticalGravity(
        [0, -300, 12], covariance=[[0, 0, 0], [0, 4, 1], [0, 1, 9]]
@@ -264,38 +264,35 @@ Scalar and multidimensional array inputs are supported.
 Measurement-set offsets remain in the fit
 results and do not enter model evaluation.
 
-To evaluate absolute gravity at several heights using one reference
-measurement, create an anchored model:
+To transfer a measured gravity value to several heights, pass the
+measurement directly to ``transfer_gravity()``:
 
 .. code-block:: python
 
-   anchored = model.with_reference_gravity(
-       9.81 * u.m / u.s**2,
+   gravity, uncertainty = model.transfer_gravity(
+       target_height=[0.71, 1.2] * u.m,
+       reference_gravity=9.81 * u.m / u.s**2,
        reference_height=0.71 * u.m,
        reference_gravity_uncertainty=2 * u.uGal,
    )
-   gravity, uncertainty = anchored.gravity([0.71, 1.2] * u.m)
 
-When constructing a model from coefficients, you can also pass
-``reference_gravity``, ``reference_height``, and the optional
-``reference_gravity_uncertainty`` directly to the constructor. Supply the
-reference gravity and height together.
+``gravity()`` and ``mean_gravity(h1, h2)`` evaluate the original
+polynomial. ``potential_difference()`` integrates that polynomial by
+default. Supply a reference gravity and height to shift the gravity level
+for that calculation:
 
-Calling ``with_reference_gravity()`` again returns a model with a replacement
-reference. ``gravity()`` and ``mean_gravity(h1, h2)`` evaluate the model in
-its current gravity datum. ``potential_difference()`` integrates in that
-same datum, with an optional explicit reference for a one-off calculation.
-A relative polynomial yields a potential difference in its relative gravity
-datum. A physical gravity reference supplies the offset needed to integrate
-absolute gravity. Gravity differences and derivatives depend only on the
-nonconstant coefficients.
+.. code-block:: python
 
-For example, ``model.potential_difference(0 * u.m, 1 * u.m)`` uses the
-polynomial's current datum. With the example anchored at 0.71 m above,
-``anchored.potential_difference(0 * u.m, 1 * u.m)`` integrates the absolute
-gravity profile over the same interval. If anchoring adds a constant
-:math:`c` to gravity, the potential difference changes by
-:math:`-c(h_2-h_1)`.
+   delta_w, uncertainty = model.potential_difference(
+       0 * u.m, 1 * u.m,
+       reference_gravity=9.81 * u.m / u.s**2,
+       reference_height=0.71 * u.m,
+   )
+
+A relative polynomial gives a potential difference in its relative gravity
+datum. A reference on an absolute gravity datum supplies the offset needed
+to integrate absolute gravity. A constant gravity shift :math:`c` changes
+the potential difference by :math:`-c(h_2-h_1)`.
 
 To evaluate gravity relative to a chosen height, use
 ``gravity_difference(h0, heights)``.

@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 import gmeterpy.units as u
-from gmeterpy.models import PolynomialVerticalGravity
+from gmeterpy.models.vgrad.floating import FloatingGravityFit
 
 
 def test_prepare_observations():
@@ -26,7 +26,7 @@ def test_prepare_observations():
         }
     )
 
-    result = PolynomialVerticalGravity.fit_gravity_differences(
+    result = FloatingGravityFit().fit(
         data.level_1.to_numpy() * u.mm,
         data.level_2.to_numpy() * u.mm,
         data.delta_g.to_numpy() * u.uGal,
@@ -40,7 +40,7 @@ def test_prepare_observations():
 
 def test_fit_requires_common_reference_within_each_set():
     with pytest.raises(ValueError, match="common reference height"):
-        PolynomialVerticalGravity.fit_gravity_differences(
+        FloatingGravityFit().fit(
             [0, 0.5] * u.m,
             [0.5, 1] * u.m,
             [-147, -141] * u.uGal,
@@ -49,12 +49,11 @@ def test_fit_requires_common_reference_within_each_set():
 
 
 def test_equal_target_ties_remain_separate():
-    result = PolynomialVerticalGravity.fit_gravity_differences(
+    result = FloatingGravityFit(degree=1).fit(
         [0, 0, 0] * u.m,
         [0.5, 0.5, 1] * u.m,
         [-150, -150, -300] * u.uGal,
         set_ids=[1, 1, 1],
-        degree=1,
     )
 
     assert result.observations.g.tolist() == [0, -150, -150, -300]
@@ -63,7 +62,7 @@ def test_equal_target_ties_remain_separate():
 
 def test_fit_requires_identifiable_coefficients():
     with pytest.raises(ValueError, match="cannot identify a degree-2 polynomial"):
-        PolynomialVerticalGravity.fit_gravity_differences(
+        FloatingGravityFit().fit(
             [0, 0, 0] * u.m,
             [0.5, 0.5, 0.5] * u.m,
             [-149, -150, -151] * u.uGal,
@@ -73,7 +72,7 @@ def test_fit_requires_identifiable_coefficients():
 
 def test_fit_requires_residual_degrees_of_freedom():
     with pytest.raises(ValueError, match="needs residual degrees of freedom"):
-        PolynomialVerticalGravity.fit_gravity_differences(
+        FloatingGravityFit().fit(
             [0, 0] * u.m,
             [0.5, 1] * u.m,
             [-147, -288] * u.uGal,

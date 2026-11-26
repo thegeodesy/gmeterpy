@@ -8,17 +8,19 @@ import pandas as pd
 import pytest
 
 import gmeterpy.units as u
-from gmeterpy.models import PolynomialVerticalGravity
-from gmeterpy.models.vgrad import PolynomialVerticalGravityFitResults
+from gmeterpy.models.vgrad import (
+    FloatingGravityFitResults,
+    PolynomialVerticalGravityFitResults,
+)
+from gmeterpy.models.vgrad.floating import FloatingGravityFit
 
 
 def _fit_ties(data, degree=2):
-    return PolynomialVerticalGravity.fit_gravity_differences(
+    return FloatingGravityFit(degree=degree).fit(
         data.level_1.to_numpy(dtype=float) / 1000 * u.m,
         data.level_2.to_numpy(dtype=float) / 1000 * u.m,
         data.delta_g.to_numpy(dtype=float) * u.uGal,
         set_ids=data.runn,
-        degree=degree,
     )
 
 
@@ -45,7 +47,7 @@ def test_fit_recovers_quadratic(quadratic_fit, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = _fit_ties(_quadratic_data(), degree=2)
 
-    assert isinstance(result, PolynomialVerticalGravityFitResults)
+    assert isinstance(result, FloatingGravityFitResults)
     assert type(result.regression.model).__name__ == "OLS"
     np.testing.assert_allclose(
         result.fitted_model.coefficients, [0, -300, 12], atol=1e-10
@@ -223,7 +225,7 @@ def test_results_return_independent_copies(quadratic_fit, attribute):
 
 def test_results_snapshot_observations(quadratic_fit):
     observations = quadratic_fit.observations
-    result = PolynomialVerticalGravityFitResults(
+    result = FloatingGravityFitResults(
         observations, quadratic_fit.regression, quadratic_fit.fitted_model
     )
     observations.loc[:, "h"] = 999
@@ -237,7 +239,7 @@ def test_results_prepare_model_outputs(quadratic_fit, degree):
     observations = fitted.observations.drop(columns="resid")
     original = observations.copy()
 
-    result = PolynomialVerticalGravityFitResults(
+    result = FloatingGravityFitResults(
         observations, fitted.regression, fitted.fitted_model
     )
 
@@ -346,3 +348,17 @@ def test_plot_reconstructs_noisy_observations():
 def test_fit_requires_positive_degree():
     with pytest.raises(ValueError, match="degree must be at least one"):
         _fit_ties(_quadratic_data(), degree=0)
+
+
+def test_prediction_table_from_shared_results(quadratic_fit):
+    results = PolynomialVerticalGravityFitResults(
+        quadratic_fit.regression, quadratic_fit.fitted_model
+    )
+    h1, h2 = 100 * u.cm, [50, 150] * u.cm
+
+    table = results.prediction_table(h1, h2)
+
+    np.testing.assert_allclose(table.h1, [1, 1])
+    np.testing.assert_allclose(table.h2, [0.5, 1.5])
+    np.testing.assert_allclose(table.gravity_difference, [141, -135])
+    np.testing.assert_allclose(table.mean_gradient, [-282, -270])
