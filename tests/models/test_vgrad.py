@@ -398,3 +398,124 @@ def test_full_polynomial_uses_constant_and_cross_covariance():
     anchored = model.with_reference_gravity(9.81 * u.m / u.s**2, reference_height=h1)
     _, uncertainty = anchored.mean_gravity(h1, h2)
     assert uncertainty.to_value(u.uGal) == pytest.approx(3)
+
+
+def test_gravity_difference_with_height_uncertainty():
+    model = PolynomialVerticalGravity([0, -300], [[0, 0], [0, 4]])
+    h1, h2 = 0 * u.m, 1 * u.m
+
+    difference, uncertainty = model.gravity_difference(
+        h1, h2, height_uncertainty=1 * u.mm
+    )
+    assert difference.to_value(u.uGal) == pytest.approx(-300)
+    assert uncertainty.to_value(u.uGal) == pytest.approx(np.sqrt(4 + 2 * 0.3**2))
+
+    _, uncertainty = model.gravity_difference(
+        h1, h2, height_uncertainty=(0.5 * u.mm, [1, 2] * u.mm)
+    )
+    np.testing.assert_allclose(
+        uncertainty.to_value(u.uGal), np.sqrt(4 + 0.15**2 + np.array([0.3, 0.6]) ** 2)
+    )
+
+
+def test_transfer_gravity_with_height_uncertainty():
+    model = PolynomialVerticalGravity([0, -300, 12], np.zeros((3, 3)))
+
+    _, uncertainty = model.transfer_gravity(
+        target_height=1 * u.m,
+        reference_gravity=9.81 * u.m / u.s**2,
+        reference_height=0 * u.m,
+        reference_gravity_uncertainty=2 * u.uGal,
+        reference_height_uncertainty=1 * u.mm,
+        target_height_uncertainty=2 * u.mm,
+    )
+
+    assert uncertainty.to_value(u.uGal) == pytest.approx(
+        np.sqrt(2**2 + 0.3**2 + 0.552**2)
+    )
+
+
+def test_gravity_with_height_uncertainty():
+    model = PolynomialVerticalGravity([0, -300], [[0, 0], [0, 4]])
+
+    gravity, uncertainty = model.gravity(1 * u.m, height_uncertainty=[1, 2] * u.mm)
+    np.testing.assert_allclose(gravity.to_value(u.uGal), [-300, -300])
+    np.testing.assert_allclose(uncertainty.to_value(u.uGal), np.hypot(2, [0.3, 0.6]))
+
+    anchored = model.with_reference_gravity(
+        980_000_000 * u.uGal, reference_height=1 * u.m
+    )
+    _, uncertainty = anchored.gravity(1 * u.m, height_uncertainty=1 * u.mm)
+    assert uncertainty.to_value(u.uGal) == pytest.approx(0.3)
+
+
+@pytest.mark.parametrize("quadratic", [0, 12])
+def test_mean_gradient_with_height_uncertainty(quadratic):
+    model = PolynomialVerticalGravity([0, -300, quadratic], np.diag([0, 4, 0]))
+
+    gradient, uncertainty = model.mean_gradient(
+        0 * u.m, 1 * u.m, height_uncertainty=(1 * u.mm, 2 * u.mm)
+    )
+    unit = u.uGal / u.m
+    assert gradient.to_value(unit) == pytest.approx(-300 + quadratic)
+    assert uncertainty.to_value(unit) == pytest.approx(
+        np.hypot(2, quadratic * np.hypot(0.001, 0.002))
+    )
+
+
+def test_derivative_height_uncertainties():
+    model = PolynomialVerticalGravity([0, -300, 12, 2], np.zeros((4, 4)))
+
+    _, gradient_sigma = model.gradient(1 * u.m, height_uncertainty=1 * u.mm)
+    _, curvature_sigma = model.curvature(1 * u.m, height_uncertainty=1 * u.mm)
+
+    assert gradient_sigma.to_value(u.uGal / u.m) == pytest.approx(0.036)
+    assert curvature_sigma.to_value(u.uGal / u.m**2) == pytest.approx(0.012)
+
+
+def test_mean_and_potential_height_uncertainties():
+    model = PolynomialVerticalGravity([0, -300], np.zeros((2, 2)))
+    start, end = 0 * u.m, 1 * u.m
+    height_uncertainty = (1 * u.mm, 2 * u.mm)
+    anchored = model.with_reference_gravity(9.81 * u.m / u.s**2, reference_height=start)
+
+    _, mean_sigma = anchored.mean_gravity(
+        start, end, height_uncertainty=height_uncertainty
+    )
+    _, potential_sigma = anchored.potential_difference(
+        start, end, height_uncertainty=height_uncertainty
+    )
+    assert mean_sigma.to_value(u.uGal) == pytest.approx(150 * np.hypot(0.001, 0.002))
+    assert potential_sigma.to_value(u.m**2 / u.s**2) == pytest.approx(
+        np.hypot(9.81 * 0.001, 9.809997 * 0.002)
+    )
+
+    _, explicit_sigma = model.potential_difference(
+        start,
+        end,
+        9.81 * u.m / u.s**2,
+        reference_height=start,
+        height_uncertainty=height_uncertainty,
+    )
+    assert explicit_sigma == potential_sigma
+
+
+def test_reference_height_uncertainty_in_anchored_evaluations():
+    model = PolynomialVerticalGravity([0, -300], np.zeros((2, 2)))
+    reference = {
+        "reference_gravity": 9.81 * u.m / u.s**2,
+        "reference_height": 0.5 * u.m,
+        "reference_height_uncertainty": 1 * u.mm,
+    }
+    anchored = model.with_reference_gravity(**reference)
+    h1, h2 = 0 * u.m, 2 * u.m
+
+    _, gravity_sigma = anchored.gravity(h2)
+    _, mean_sigma = anchored.mean_gravity(h1, h2)
+    _, potential_sigma = anchored.potential_difference(h1, h2)
+    _, explicit_sigma = model.potential_difference(h1, h2, **reference)
+
+    assert gravity_sigma.to_value(u.uGal) == pytest.approx(0.3)
+    assert mean_sigma.to_value(u.uGal) == pytest.approx(0.3)
+    assert potential_sigma.to_value(u.uGal * u.m) == pytest.approx(0.6)
+    assert explicit_sigma == potential_sigma

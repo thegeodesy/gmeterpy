@@ -8,7 +8,7 @@ evaluates gravity changes and their uncertainties between heights.
 import itertools
 from copy import copy
 from os import PathLike
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, NamedTuple, Self
 
 import numpy as np
 import pandas as pd
@@ -21,6 +21,13 @@ from gmeterpy.statistics.results import FitResults
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
     from statsmodels.regression.linear_model import RegressionResultsWrapper
+
+
+class _GravityReference(NamedTuple):
+    gravity: u.Quantity
+    height: u.Quantity
+    gravity_uncertainty: u.Quantity
+    height_uncertainty: u.Quantity
 
 
 class PolynomialVerticalGravity:
@@ -47,13 +54,18 @@ class PolynomialVerticalGravity:
         Standard uncertainty of the reference gravity, independent of the
         fitted coefficients. Defaults to zero when a reference is supplied.
 
+    reference_height_uncertainty : ~astropy.units.Quantity, optional
+        Standard uncertainty of the reference height. Omit to treat it as
+        exact. Assumed independent of the fit, reference gravity, and
+        evaluation heights.
+
     Notes
     -----
     The model describes gravity changes over a local height interval relative
     to a measurement mark. Evaluations outside the observed height range are
     extrapolations. The propagated uncertainty accounts for coefficient
-    uncertainty and any supplied reference gravity uncertainty. It excludes
-    departures of the actual gravity field from the polynomial.
+    uncertainty and any supplied reference gravity and height uncertainties.
+    It excludes departures of the actual gravity field from the polynomial.
 
     For degree :math:`n` and coefficients :math:`a_k`, the gravity change
     from height zero and its local gradient are
@@ -76,7 +88,7 @@ class PolynomialVerticalGravity:
        u(\Delta g_{ij}) = \sqrt{\mathbf h_{ij}^{\mathsf T} C_a \mathbf h_{ij}}.
 
     Evaluation methods return a (value, uncertainty) tuple and treat heights
-    as exact. Heights are expressed in metres and gravity changes in microgals.
+    as exact unless height uncertainties are supplied. Heights are expressed in metres and gravity changes in microgals.
     The floating-gravity fit follows Eq. (3-2) of Jaakko Mäkinen (2010)
     [Makinen2010]_. The model covariance for difference fits has a zero row
     and column for the fixed constant. Figure 2a illustrates the quadratic
@@ -92,6 +104,7 @@ class PolynomialVerticalGravity:
         reference_gravity: u.Quantity | None = None,
         reference_height: u.Quantity | None = None,
         reference_gravity_uncertainty: u.Quantity | None = None,
+        reference_height_uncertainty: u.Quantity | None = None,
     ) -> None:
         """Convert coefficients and covariance to the metre and microgal basis."""
         gravity_unit, height_unit = units
@@ -101,7 +114,10 @@ class PolynomialVerticalGravity:
         orders = np.arange(coefficients.size)
         scale = gravity_unit.to(u.uGal) / height_unit.to(u.m) ** orders
         self._reference = self._prepare_reference(
-            reference_gravity, reference_height, reference_gravity_uncertainty
+            reference_gravity,
+            reference_height,
+            reference_gravity_uncertainty,
+            reference_height_uncertainty,
         )
         self._coefficients = np.asarray(coefficients * scale, dtype=np.float64)
         self._basis = np.eye(coefficients.size)
@@ -161,6 +177,7 @@ class PolynomialVerticalGravity:
         *,
         reference_height: u.Quantity,
         reference_gravity_uncertainty: u.Quantity = 0 * u.uGal,
+        reference_height_uncertainty: u.Quantity | None = None,
     ) -> Self:
         r"""Return a new model with gravity anchored to a reference measurement.
 
@@ -174,6 +191,11 @@ class PolynomialVerticalGravity:
             Standard uncertainty of the reference gravity, independent of
             the fitted coefficients. Defaults to zero.
 
+        reference_height_uncertainty : ~astropy.units.Quantity, optional
+            Standard uncertainty of the reference height. Omit to treat it
+            as exact. Assumed independent of the fit, reference gravity,
+            and evaluation heights.
+
         Returns
         -------
         PolynomialVerticalGravity
@@ -183,7 +205,10 @@ class PolynomialVerticalGravity:
         """
         anchored = copy(self)
         anchored._reference = self._prepare_reference(
-            reference_gravity, reference_height, reference_gravity_uncertainty
+            reference_gravity,
+            reference_height,
+            reference_gravity_uncertainty,
+            reference_height_uncertainty,
         )
         return anchored
 
@@ -192,12 +217,14 @@ class PolynomialVerticalGravity:
         reference_gravity: u.Quantity | None,
         reference_height: u.Quantity | None,
         reference_gravity_uncertainty: u.Quantity | None,
-    ) -> tuple[u.Quantity, u.Quantity, u.Quantity] | None:
+        reference_height_uncertainty: u.Quantity | None,
+    ) -> _GravityReference | None:
         """Validate and copy an optional reference in the model's units."""
         if (
             reference_gravity is None
             and reference_height is None
             and reference_gravity_uncertainty is None
+            and reference_height_uncertainty is None
         ):
             return None
         if reference_gravity is None or reference_height is None:
@@ -206,20 +233,34 @@ class PolynomialVerticalGravity:
             )
         if reference_gravity_uncertainty is None:
             reference_gravity_uncertainty = u.Quantity(0, u.uGal)
-        return (
+        height_sigma = (
+            0.0
+            if reference_height_uncertainty is None
+            else PolynomialVerticalGravity._height_sigma_metres(
+                reference_height_uncertainty
+            )
+        )
+        return _GravityReference(
             reference_gravity.to(u.uGal),
             reference_height.to(u.m),
             reference_gravity_uncertainty.to(u.uGal),
+            u.Quantity(height_sigma, u.m, copy=True),
         )
 
     @u.quantity_input(heights=u.m)
-    def gravity(self, heights: u.Quantity) -> tuple[u.Quantity, u.Quantity | None]:
+    def gravity(
+        self, heights: u.Quantity, *, height_uncertainty: u.Quantity | None = None
+    ) -> tuple[u.Quantity, u.Quantity | None]:
         r"""Evaluate the gravity profile and its standard uncertainty.
 
         Parameters
         ----------
         heights : ~astropy.units.Quantity
             Scalar or array of heights above the model datum.
+        height_uncertainty : ~astropy.units.Quantity, optional
+            Standard uncertainty of the evaluation heights, independent of
+            the fit and any stored reference. Must broadcast with heights.
+            Defaults to exact evaluation heights.
 
         Returns
         -------
@@ -229,58 +270,87 @@ class PolynomialVerticalGravity:
             Uncertainty is None without coefficient covariance.
         """
         if self._reference is not None:
-            reference_gravity, reference_height, reference_gravity_uncertainty = (
-                self._reference
-            )
             return self.transfer_gravity(
                 heights,
-                reference_gravity,
-                reference_height=reference_height,
-                reference_gravity_uncertainty=reference_gravity_uncertainty,
+                self._reference.gravity,
+                reference_height=self._reference.height,
+                reference_gravity_uncertainty=self._reference.gravity_uncertainty,
+                reference_height_uncertainty=self._reference.height_uncertainty,
+                target_height_uncertainty=height_uncertainty,
             )
-        basis = polyval(np.asarray(heights.to_value(u.m)), self._basis)
-        return self._gravity_quantities(*self._evaluate_basis(basis), unit=u.uGal)
+        return self._evaluate_at_height(heights, height_uncertainty, 0, u.uGal)
 
     @u.quantity_input(h1=u.m, h2=u.m)
     def gravity_difference(
-        self, h1: u.Quantity, h2: u.Quantity
+        self,
+        h1: u.Quantity,
+        h2: u.Quantity,
+        *,
+        height_uncertainty: u.Quantity | tuple[u.Quantity, u.Quantity] | None = None,
     ) -> tuple[u.Quantity, u.Quantity | None]:
         r"""Evaluate a gravity difference and its standard uncertainty.
 
         Parameters
         ----------
         h1, h2 : ~astropy.units.Quantity
-            Initial and final heights from the same datum. Arrays must broadcast.
+            Initial and final heights from the same datum.
+        height_uncertainty : ~astropy.units.Quantity or tuple, optional
+            Total standard uncertainty of the sensor heights. Supply one
+            quantity for both endpoints or a pair ordered as ``(h1, h2)``.
+            Omit to treat heights as exact.
+            Both endpoint uncertainties must broadcast with the heights.
 
         Returns
         -------
         value, uncertainty : tuple
             :math:`\Delta g_{ij}=g(h_j)-g(h_i)` and its standard uncertainty,
-            both in microgals. Uncertainty is None without covariance.
+            both in microgals. Uncertainty is None without coefficient covariance.
+
+        Notes
+        -----
+        Height uncertainty is propagated to first order using the endpoint
+        sensitivities :math:`-g'(h_1)` and :math:`g'(h_2)`. The height
+        errors are assumed uncorrelated with each other and independent
+        of the fitted coefficients.
         """
         h1_m, h2_m = np.broadcast_arrays(h1.to_value(u.m), h2.to_value(u.m))
+        height_sigmas = None
+        if height_uncertainty is not None:
+            u1, u2 = self._endpoint_height_sigmas(height_uncertainty)
+            h1_m, h2_m, u1_m, u2_m = np.broadcast_arrays(h1_m, h2_m, u1, u2)
+            height_sigmas = u1_m, u2_m
         basis = polyval(h2_m, self._basis) - polyval(h1_m, self._basis)
-        return self._gravity_quantities(*self._evaluate_basis(basis), unit=u.uGal)
+        value, uncertainty = self._evaluate_basis(basis)
+        if height_sigmas is not None and uncertainty is not None:
+            u1_m, u2_m = height_sigmas
+            derivative = polyder(self._coefficients)
+            s1 = polyval(h1_m, derivative) * u1_m
+            s2 = polyval(h2_m, derivative) * u2_m
+            height_sigma = np.hypot(s1, s2)
+            uncertainty = np.hypot(uncertainty, height_sigma)
+        return self._gravity_quantities(value, uncertainty, unit=u.uGal)
 
     @u.quantity_input(
-        height=u.m,
+        target_height=u.m,
         reference_gravity=u.uGal,
         reference_height=u.m,
         reference_gravity_uncertainty=u.uGal,
     )
     def transfer_gravity(
         self,
-        height: u.Quantity,
+        target_height: u.Quantity,
         reference_gravity: u.Quantity,
         *,
         reference_height: u.Quantity,
         reference_gravity_uncertainty: u.Quantity = 0 * u.uGal,
+        reference_height_uncertainty: u.Quantity | None = None,
+        target_height_uncertainty: u.Quantity | None = None,
     ) -> tuple[u.Quantity, u.Quantity | None]:
         r"""Transfer reference gravity to a target height and propagate its standard uncertainty.
 
         Parameters
         ----------
-        height : ~astropy.units.Quantity
+        target_height : ~astropy.units.Quantity
             Target height in a compatible length unit.
         reference_gravity : ~astropy.units.Quantity
             Absolute gravity at the reference height.
@@ -288,7 +358,12 @@ class PolynomialVerticalGravity:
             Reference height measured from the same datum as the target.
         reference_gravity_uncertainty : ~astropy.units.Quantity, optional
             Standard uncertainty of reference gravity, independent of the
-            fitted coefficients. Defaults to zero. All inputs must broadcast.
+            fitted coefficients and height errors. Defaults to zero.
+        reference_height_uncertainty, target_height_uncertainty : ~astropy.units.Quantity, optional
+            Standard uncertainties of the reference and target heights,
+            respectively. Each defaults to an exact height. Height errors
+            are assumed uncorrelated and independent of the fit. Inputs
+            must broadcast.
 
         Returns
         -------
@@ -296,7 +371,23 @@ class PolynomialVerticalGravity:
             :math:`g_r+g(h)-g(h_r)` and its standard uncertainty, both in
             microgals. Uncertainty is None without coefficient covariance.
         """
-        difference, uncertainty = self.gravity_difference(reference_height, height)
+        difference, uncertainty = self.gravity_difference(
+            reference_height,
+            target_height,
+            height_uncertainty=(
+                None
+                if reference_height_uncertainty is None
+                and target_height_uncertainty is None
+                else (
+                    0 * u.m
+                    if reference_height_uncertainty is None
+                    else reference_height_uncertainty,
+                    0 * u.m
+                    if target_height_uncertainty is None
+                    else target_height_uncertainty,
+                )
+            ),
+        )
         reference, difference_values, reference_sigma = np.broadcast_arrays(
             reference_gravity.to_value(u.uGal),
             difference.to_value(u.uGal),
@@ -318,6 +409,8 @@ class PolynomialVerticalGravity:
         *,
         reference_height: u.Quantity | None = None,
         reference_gravity_uncertainty: u.Quantity | None = None,
+        reference_height_uncertainty: u.Quantity | None = None,
+        height_uncertainty: u.Quantity | tuple[u.Quantity, u.Quantity] | None = None,
     ) -> tuple[u.Quantity, u.Quantity | None]:
         r"""Evaluate the gravity potential difference and its standard uncertainty.
 
@@ -333,9 +426,19 @@ class PolynomialVerticalGravity:
         reference_gravity_uncertainty : ~astropy.units.Quantity, optional
             Standard uncertainty of reference gravity, independent of the
             fitted coefficients. Defaults to zero for an explicit reference.
-            Omit all three reference arguments to use the model's current
+            Omit the reference arguments to use the model's current
             gravity datum.
             All inputs must broadcast.
+
+        reference_height_uncertainty : ~astropy.units.Quantity, optional
+            Standard uncertainty of an explicit reference height. Supply it
+            with reference gravity and height. Defaults to an exact height.
+            Assumed independent of the fit, reference gravity, and endpoints.
+        height_uncertainty : ~astropy.units.Quantity or tuple, optional
+            One standard uncertainty for both endpoints or a pair ordered
+            as ``(h1, h2)``. Endpoint errors are treated as uncorrelated
+            and independent of the fit and gravity reference. Omit to
+            treat both endpoints as exact.
 
         Returns
         -------
@@ -354,20 +457,40 @@ class PolynomialVerticalGravity:
            \Delta W=-d g_r-\sum_{k=1}^n q_k a_k,
            \qquad q_k=\frac{h_2^{k+1}-h_1^{k+1}}{k+1}-d h_r^k,
 
-           u^2(\Delta W)=\mathbf q^{\mathsf T} C_a\mathbf q+d^2u^2(g_r).
+           u^2(\Delta W)=\mathbf q^{\mathsf T} C_a\mathbf q+d^2u^2(g_r)
+               +d^2g'(h_r)^2u^2(h_r)+g(h_1)^2u^2(h_1)+g(h_2)^2u^2(h_2).
 
         Without a reference, integrate the full polynomial in its current
         gravity datum and apply :math:`dW/dh=-g(h)`. For a relative model,
         this gives a potential difference in that gravity datum. An unknown
         constant gravity offset contributes that offset times the signed height
-        separation to the integral. Heights are treated as exact.
+        separation to the integral. The reference height sensitivity is
+        :math:`d g'(h_r)`.
+        Endpoint height uncertainties, if supplied, enter through the
+        sensitivities :math:`g(h_1)` and :math:`-g(h_2)`.
         """
         reference = self._prepare_reference(
-            reference_gravity, reference_height, reference_gravity_uncertainty
+            reference_gravity,
+            reference_height,
+            reference_gravity_uncertainty,
+            reference_height_uncertainty,
         )
         if reference is None:
             reference = self._reference
         integral, uncertainty = self._integrated_gravity(h1, h2, reference)
+        if height_uncertainty is not None:
+            u1, u2 = self._endpoint_height_sigmas(height_uncertainty)
+            unit = u.uGal * u.m
+            integral_value, u1, u2 = np.broadcast_arrays(
+                integral.to_value(unit), u1, u2
+            )
+            integral = u.Quantity(integral_value, unit)
+            if uncertainty is not None:
+                g1, g2 = self._endpoint_gravities(h1, h2, reference)
+                uncertainty = u.Quantity(
+                    np.hypot(uncertainty.to_value(unit), np.hypot(g1 * u1, g2 * u2)),
+                    unit,
+                )
         potential_unit = u.m**2 / u.s**2
         if uncertainty is not None:
             uncertainty = uncertainty.to(potential_unit)
@@ -377,7 +500,7 @@ class PolynomialVerticalGravity:
         self,
         h1: u.Quantity,
         h2: u.Quantity,
-        gravity_reference: tuple[u.Quantity, u.Quantity, u.Quantity] | None,
+        gravity_reference: _GravityReference | None,
     ) -> tuple[u.Quantity, u.Quantity | None]:
         """Integrate the polynomial and propagate its uncertainty."""
         h1_m = np.asarray(h1.to_value(u.m), dtype=float)
@@ -390,15 +513,15 @@ class PolynomialVerticalGravity:
                 *self._evaluate_basis(basis), unit=u.uGal * u.m
             )
 
-        reference_gravity, reference_height, reference_gravity_uncertainty = (
-            gravity_reference
-        )
-        h1_m, h2_m, reference, gravity, gravity_uncertainty = np.broadcast_arrays(
-            h1_m,
-            h2_m,
-            reference_height.to_value(u.m),
-            reference_gravity.to_value(u.uGal),
-            reference_gravity_uncertainty.to_value(u.uGal),
+        h1_m, h2_m, reference, gravity, gravity_sigma, reference_sigma = (
+            np.broadcast_arrays(
+                h1_m,
+                h2_m,
+                gravity_reference.height.to_value(u.m),
+                gravity_reference.gravity.to_value(u.uGal),
+                gravity_reference.gravity_uncertainty.to_value(u.uGal),
+                gravity_reference.height_uncertainty.to_value(u.m),
+            )
         )
         separation = h2_m - h1_m
         basis = polyval(h2_m, antiderivative) - polyval(h1_m, antiderivative)
@@ -406,12 +529,18 @@ class PolynomialVerticalGravity:
         value, uncertainty = self._evaluate_basis(basis)
         value = value + separation * gravity
         if uncertainty is not None:
-            uncertainty = np.hypot(uncertainty, separation * gravity_uncertainty)
+            slope = polyval(reference, polyder(self._coefficients))
+            reference_gravity_sigma = np.hypot(gravity_sigma, slope * reference_sigma)
+            uncertainty = np.hypot(uncertainty, separation * reference_gravity_sigma)
         return self._gravity_quantities(value, uncertainty, unit=u.uGal * u.m)
 
     @u.quantity_input(h1=u.m, h2=u.m)
     def mean_gravity(
-        self, h1: u.Quantity, h2: u.Quantity
+        self,
+        h1: u.Quantity,
+        h2: u.Quantity,
+        *,
+        height_uncertainty: u.Quantity | tuple[u.Quantity, u.Quantity] | None = None,
     ) -> tuple[u.Quantity, u.Quantity | None]:
         r"""Evaluate the interval mean of the gravity polynomial.
 
@@ -419,6 +548,12 @@ class PolynomialVerticalGravity:
         ----------
         h1, h2 : ~astropy.units.Quantity
             Distinct endpoints relative to the model datum. Arrays must broadcast.
+
+        height_uncertainty : ~astropy.units.Quantity or tuple, optional
+            One standard uncertainty for both endpoints or a pair ordered
+            as ``(h1, h2)``. Endpoint errors are treated as uncorrelated
+            and independent of the fit and gravity reference. Omit to
+            treat both endpoints as exact.
 
         Returns
         -------
@@ -431,16 +566,34 @@ class PolynomialVerticalGravity:
         integral, uncertainty = self._integrated_gravity(h1, h2, self._reference)
         if uncertainty is not None:
             uncertainty = (uncertainty / abs(separation)).to(u.uGal)
-        return (integral / separation).to(u.uGal), uncertainty
+        mean = (integral / separation).to(u.uGal)
+        if height_uncertainty is not None:
+            u1, u2 = self._endpoint_height_sigmas(height_uncertainty)
+            mean_values, u1, u2 = np.broadcast_arrays(mean.value, u1, u2)
+            mean = u.Quantity(mean_values, u.uGal)
+            if uncertainty is not None:
+                g1, g2 = self._endpoint_gravities(h1, h2, self._reference)
+                height_sigma = np.hypot(
+                    (mean_values - g1) * u1, (g2 - mean_values) * u2
+                ) / np.abs(separation.to_value(u.m))
+                uncertainty = u.Quantity(
+                    np.hypot(uncertainty.to_value(u.uGal), height_sigma), u.uGal
+                )
+        return mean, uncertainty
 
     @u.quantity_input(height=u.m)
-    def gradient(self, height: u.Quantity) -> tuple[u.Quantity, u.Quantity | None]:
+    def gradient(
+        self, height: u.Quantity, *, height_uncertainty: u.Quantity | None = None
+    ) -> tuple[u.Quantity, u.Quantity | None]:
         r"""Evaluate the local gradient and its standard uncertainty.
 
         Parameters
         ----------
         height : ~astropy.units.Quantity
             Scalar or array of heights above the model datum.
+        height_uncertainty : ~astropy.units.Quantity, optional
+            Standard uncertainty of the evaluation height, independent of
+            the fit. Must broadcast with height. Omit to treat height as exact.
 
         Returns
         -------
@@ -449,19 +602,27 @@ class PolynomialVerticalGravity:
             uncertainty in microgals per metre. Uncertainty is None without
             covariance.
         """
-        basis = polyval(np.asarray(height.to_value(u.m)), polyder(self._basis, 1))
-        return self._gravity_quantities(*self._evaluate_basis(basis), unit=u.uGal / u.m)
+        return self._evaluate_at_height(height, height_uncertainty, 1, u.uGal / u.m)
 
     @u.quantity_input(h1=u.m, h2=u.m)
     def mean_gradient(
-        self, h1: u.Quantity, h2: u.Quantity
+        self,
+        h1: u.Quantity,
+        h2: u.Quantity,
+        *,
+        height_uncertainty: u.Quantity | tuple[u.Quantity, u.Quantity] | None = None,
     ) -> tuple[u.Quantity, u.Quantity | None]:
         r"""Evaluate the interval-average gradient and its standard uncertainty.
 
         Parameters
         ----------
         h1, h2 : ~astropy.units.Quantity
-            Distinct endpoints from the same datum. Arrays must broadcast.
+            Distinct endpoints from the same datum.
+        height_uncertainty : ~astropy.units.Quantity or tuple, optional
+            One standard uncertainty for both endpoints or a pair ordered
+            as ``(h1, h2)``. The endpoint errors are assumed uncorrelated
+            and independent of the fit. All inputs must broadcast.
+            Omit to treat both heights as exact.
 
         Returns
         -------
@@ -471,18 +632,39 @@ class PolynomialVerticalGravity:
         """
         separation = u.Quantity(self._height_difference(h1, h2), u.m)
         difference, uncertainty = self.gravity_difference(h1, h2)
+        mean = difference / separation
         if uncertainty is not None:
             uncertainty = uncertainty / abs(separation)
-        return difference / separation, uncertainty
+        if height_uncertainty is not None:
+            u1, u2 = self._endpoint_height_sigmas(height_uncertainty)
+            unit = u.uGal / u.m
+            mean_values, u1, u2 = np.broadcast_arrays(mean.to_value(unit), u1, u2)
+            mean = u.Quantity(mean_values, unit)
+            if uncertainty is not None:
+                derivative = polyder(self._coefficients)
+                g1 = polyval(np.asarray(h1.to_value(u.m)), derivative)
+                g2 = polyval(np.asarray(h2.to_value(u.m)), derivative)
+                height_sigma = np.hypot(
+                    (mean_values - g1) * u1, (g2 - mean_values) * u2
+                ) / np.abs(separation.to_value(u.m))
+                uncertainty = u.Quantity(
+                    np.hypot(uncertainty.to_value(unit), height_sigma), unit
+                )
+        return mean, uncertainty
 
     @u.quantity_input(height=u.m)
-    def curvature(self, height: u.Quantity) -> tuple[u.Quantity, u.Quantity | None]:
+    def curvature(
+        self, height: u.Quantity, *, height_uncertainty: u.Quantity | None = None
+    ) -> tuple[u.Quantity, u.Quantity | None]:
         r"""Evaluate curvature and its standard uncertainty.
 
         Parameters
         ----------
         height : ~astropy.units.Quantity
             Scalar or array of heights above the model datum.
+        height_uncertainty : ~astropy.units.Quantity, optional
+            Standard uncertainty of the evaluation height, independent of
+            the fit. Must broadcast with height. Omit to treat height as exact.
 
         Returns
         -------
@@ -491,9 +673,44 @@ class PolynomialVerticalGravity:
             uncertainty in microgals per metre squared. Uncertainty is None
             without covariance.
         """
-        basis = polyval(np.asarray(height.to_value(u.m)), polyder(self._basis, 2))
-        return self._gravity_quantities(
-            *self._evaluate_basis(basis), unit=u.uGal / u.m**2
+        return self._evaluate_at_height(height, height_uncertainty, 2, u.uGal / u.m**2)
+
+    def _evaluate_at_height(
+        self,
+        height: u.Quantity,
+        height_uncertainty: u.Quantity | None,
+        order: int,
+        unit: u.UnitBase,
+    ) -> tuple[u.Quantity, u.Quantity | None]:
+        """Evaluate a polynomial derivative and propagate height uncertainty."""
+        height_m = np.asarray(height.to_value(u.m))
+        height_sigma = None
+        if height_uncertainty is not None:
+            height_m, height_sigma = np.broadcast_arrays(
+                height_m, self._height_sigma_metres(height_uncertainty)
+            )
+        basis = polyval(height_m, polyder(self._basis, order))
+        value, uncertainty = self._evaluate_basis(basis)
+        if height_sigma is not None and uncertainty is not None:
+            sensitivity = polyval(height_m, polyder(self._coefficients, order + 1))
+            uncertainty = np.hypot(uncertainty, sensitivity * height_sigma)
+        return self._gravity_quantities(value, uncertainty, unit=unit)
+
+    def _endpoint_gravities(
+        self,
+        h1: u.Quantity,
+        h2: u.Quantity,
+        reference: _GravityReference | None,
+    ):
+        """Evaluate the endpoints in the gravity datum used for integration."""
+        offset = 0.0
+        if reference is not None:
+            offset = np.asarray(
+                reference.gravity.to_value(u.uGal), dtype=float
+            ) - polyval(np.asarray(reference.height.to_value(u.m)), self._coefficients)
+        return (
+            polyval(np.asarray(h1.to_value(u.m)), self._coefficients) + offset,
+            polyval(np.asarray(h2.to_value(u.m)), self._coefficients) + offset,
         )
 
     def _evaluate_basis(self, basis: NDArray[np.floating]):
@@ -514,6 +731,25 @@ class PolynomialVerticalGravity:
             u.Quantity(value, unit),
             None if uncertainty is None else u.Quantity(uncertainty, unit),
         )
+
+    @staticmethod
+    def _height_sigma_metres(uncertainty: u.Quantity) -> NDArray[np.float64]:
+        """Convert a nonnegative standard height uncertainty to metres."""
+        sigma = np.asarray(uncertainty.to_value(u.m), dtype=np.float64)
+        if np.any(~np.isfinite(sigma) | (sigma < 0)):
+            raise ValueError("Height uncertainties must be finite and nonnegative")
+        return sigma
+
+    @classmethod
+    def _endpoint_height_sigmas(
+        cls, uncertainty: u.Quantity | tuple[u.Quantity, u.Quantity]
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Convert a shared uncertainty or an endpoint pair to metres."""
+        if isinstance(uncertainty, u.Quantity):
+            sigma = cls._height_sigma_metres(uncertainty)
+            return sigma, sigma
+        h1_sigma, h2_sigma = uncertainty
+        return cls._height_sigma_metres(h1_sigma), cls._height_sigma_metres(h2_sigma)
 
     @staticmethod
     def _height_difference(h1: u.Quantity, h2: u.Quantity):

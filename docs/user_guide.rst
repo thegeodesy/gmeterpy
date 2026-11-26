@@ -207,8 +207,22 @@ for that set at height zero. The report also shows the set's minimum measured
 height alongside its offset label.
 Polynomial parameters are labeled ``a1``, ``a2``, and so on.
 ``model.covariance`` returns the polynomial coefficient block as a NumPy
-array in ascending power order, including the off-diagonal terms. Heights
-are treated as exact when propagating uncertainty.
+array in ascending power order, including the off-diagonal terms.
+
+``gravity()``, ``gradient()``, and ``curvature()`` accept
+``height_uncertainty`` for their evaluation heights. For
+``gravity_difference()``, ``mean_gravity()``, ``mean_gradient()``, and
+``potential_difference()``, supply one standard uncertainty for both
+interval endpoints or a pair ordered as ``(h1, h2)``.
+
+``transfer_gravity()`` uses separate ``reference_height_uncertainty`` and
+``target_height_uncertainty`` keywords. To store a reference height
+uncertainty for use by ``gravity()``, ``mean_gravity()``, and
+``potential_difference()``, pass ``reference_height_uncertainty`` when
+constructing or anchoring the model. You can also pass it alongside an
+explicit reference in ``potential_difference()``. Omitted uncertainties
+are treated as zero. Height errors are assumed uncorrelated and independent
+of the fit and reference gravity.
 
 Observations, parameters, standard errors, residuals, and covariance tables
 are returned as independent copies. The fitted model is constructed once;
