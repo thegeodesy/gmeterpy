@@ -121,6 +121,40 @@ def test_fit_diagnostics(quadratic_fit):
     assert quadratic_fit.s0 == pytest.approx(0, abs=1e-10)
 
 
+def test_influence_table_uses_geodetic_residuals():
+    data = _quadratic_data()
+    data.loc[0, "delta_g"] += 3
+    result = _fit_ties(data)
+    influence = result.regression.get_influence()
+
+    table = result.influence_table()
+
+    pd.testing.assert_frame_equal(
+        table[result.observations.columns], result.observations
+    )
+    np.testing.assert_allclose(table.leverage, influence.hat_matrix_diag)
+    np.testing.assert_allclose(
+        table.studentized_residual, -influence.resid_studentized_internal
+    )
+    np.testing.assert_allclose(table.cooks_distance, influence.cooks_distance[0])
+
+
+def test_influence_table_handles_unit_leverage():
+    result = FloatingGravityFit().fit(
+        [0, 0, 0, 0] * u.m,
+        [0.5, 0.5, 0.5, 1.0] * u.m,
+        [-147, -146, -148, -288] * u.uGal,
+        set_ids=[1, 1, 1, 1],
+    )
+
+    table = result.influence_table()
+    target = table.loc[table.h == 1.0].iloc[0]
+
+    assert target.leverage == pytest.approx(1)
+    assert np.isnan(target.studentized_residual)
+    assert np.isnan(target.cooks_distance)
+
+
 @pytest.mark.parametrize("rename_runs", [False, True])
 def test_fit_is_invariant_to_input_order_and_run_names(rename_runs):
     source = Path(__file__).resolve().parents[2] / "examples/vgfit/sochi.csv"

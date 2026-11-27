@@ -234,6 +234,31 @@ Diagnostics are inherited from ``gmeterpy.numerics.statistics.FitResults``:
 ``degrees_of_freedom`` and ``s0``. Parameter counts include constants, and
 residual degrees of freedom are determined by the backend model rank.
 
+Use ``results.influence_table()`` to see leverage, internally studentized
+residuals, and Cook's distance alongside the floating observations.
+Studentized residuals retain the fitted-minus-observed sign.
+
+To check how strongly individual measurement sets affect a gravity
+transfer, refit with each set omitted in turn. The default benchmark is
+the transfer from 1 m to the mark at 0 m.
+
+.. code-block:: python
+
+   transfers, held_out = fitter.leave_one_set_out(
+       h1=[0, 0, 0, 0, 0, 0] * u.m,
+       h2=[0.5, 1.0, 1.5, 0.5, 1.0, 1.5] * u.m,
+       delta_g=[-147, -289, -423, -148, -288, -424] * u.uGal,
+       set_ids=[1, 1, 1, 2, 2, 2],
+   )
+   largest_shift = transfers.loc[transfers.is_largest_shift]
+
+``transfers`` gives each refit's shift from the full-fit transfer and
+flags extrapolation relative to the observations used in each fit.
+Pass ``transfer_h1`` and ``transfer_h2`` to assess a different interval.
+``held_out`` gives predicted-minus-observed differences for ties excluded
+from each refit. Both are expressed in microgals. When a refit cannot be
+estimated, the transfer table records the reason in ``fit_error``.
+
 Models can also be created directly from published coefficients:
 
 .. code-block:: python

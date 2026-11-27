@@ -2,7 +2,7 @@
 
 import itertools
 from os import PathLike
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,10 @@ from .polynomial import PolynomialVerticalGravity, PolynomialVerticalGravityFitR
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
     from statsmodels.regression.linear_model import RegressionResultsWrapper
+
+
+class _InsufficientFitData(ValueError):
+    """The observations cannot support the requested fit."""
 
 
 class FloatingGravityFit:
@@ -121,12 +125,12 @@ class FloatingGravityFit:
         design = adjustment.exog
         assert design is not None
         if np.linalg.matrix_rank(design) != design.shape[1]:
-            raise ValueError(
+            raise _InsufficientFitData(
                 f"The observations cannot identify a degree-{degree} polynomial "
                 "and all run offsets"
             )
         if design.shape[0] <= design.shape[1]:
-            raise ValueError(
+            raise _InsufficientFitData(
                 "The fit needs residual degrees of freedom to estimate uncertainty"
             )
         regression = adjustment.fit()
@@ -139,6 +143,147 @@ class FloatingGravityFit:
             units=(u.uGal, u.m),
         )
         return FloatingGravityFitResults(observations, regression, fitted_model)
+
+    @u.quantity_input(h1=u.m, h2=u.m, delta_g=u.uGal, transfer_h1=u.m, transfer_h2=u.m)
+    def leave_one_set_out(
+        self,
+        h1: u.Quantity,
+        h2: u.Quantity,
+        delta_g: u.Quantity,
+        *,
+        set_ids: ArrayLike,
+        transfer_h1: u.Quantity = 1 * u.m,
+        transfer_h2: u.Quantity = 0 * u.m,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Refit without each set and compare gravity transfers.
+
+        Parameters
+        ----------
+        h1, h2, delta_g : ~astropy.units.Quantity
+            Tie reference heights, target heights, and measured gravity
+            differences (target minus reference), as in ``fit()``.
+        set_ids : array_like
+            One set identifier per tie, with no missing identifiers.
+        transfer_h1, transfer_h2 : ~astropy.units.Quantity, optional
+            Initial and final heights for the transfers to compare. Default
+            is 1 m to 0 m. Heights in each pair must differ. Arrays must
+            broadcast.
+
+        Returns
+        -------
+        transfers : pandas.DataFrame
+            One row per omitted set and transfer pair. Includes the full-fit
+            gravity difference and its standard uncertainty, the refitted
+            difference, and ``transfer_shift`` (refit minus full fit).
+            ``is_largest_shift`` marks the largest absolute shift for each
+            interval, including ties. ``full_fit_extrapolated`` and
+            ``refit_extrapolated`` flag either endpoint outside the
+            respective fit's observed height range.
+            ``fit_error`` gives the reason when an omission leaves too little
+            data to fit. The refitted difference, shift, and extrapolation
+            flag are missing in that case.
+        held_out_ties : pandas.DataFrame
+            One row per original tie, in input order. Includes its observed
+            difference, the prediction from the fit that omitted its set,
+            and ``prediction_error`` (predicted minus observed). Predictions
+            and errors are NaN when the refit is unavailable.
+
+        Notes
+        -----
+        Heights in the tables are in metres, and gravity values are in
+        microgals. The full fit and refits use the same polynomial degree
+        and equal weights. Transfer shifts measure sensitivity to set omission.
+        """
+        set_ids = np.asarray(set_ids)
+        if pd.isna(set_ids).any():
+            raise ValueError("Every tie must have a set identifier")
+
+        full_fit = self.fit(h1, h2, delta_g, set_ids=set_ids)
+        baseline = (
+            full_fit.prediction_table(transfer_h1, transfer_h2)
+            .filter(
+                items=[
+                    "h1",
+                    "h2",
+                    "gravity_difference",
+                    "gravity_difference_uncertainty",
+                ]
+            )
+            .rename(
+                columns={
+                    "gravity_difference": "full_fit_delta_g",
+                    "gravity_difference_uncertainty": "full_fit_uncertainty",
+                }
+            )
+        )
+        endpoints = baseline.filter(items=["h1", "h2"])
+        lower_endpoint = endpoints.min(axis="columns")
+        upper_endpoint = endpoints.max(axis="columns")
+        observed_heights = full_fit.observations.h
+        baseline["full_fit_extrapolated"] = lower_endpoint.lt(
+            observed_heights.min()
+        ) | upper_endpoint.gt(observed_heights.max())
+
+        held_out_ties = pd.DataFrame(
+            {
+                "set_ids": set_ids,
+                "h1": h1.to_value(u.m),
+                "h2": h2.to_value(u.m),
+                "observed_delta_g": delta_g.to_value(u.uGal),
+                "predicted_delta_g": np.nan,
+            }
+        )
+        transfers = []
+        for set_id in pd.unique(set_ids):
+            omitted = set_ids == set_id
+            refit_delta_g = np.full(len(baseline), np.nan)
+            refit_extrapolated = None
+            fit_error = None
+            try:
+                if omitted.all():
+                    raise _InsufficientFitData("No measurement sets remain")
+                refit = self.fit(
+                    cast(u.Quantity, h1[~omitted]),
+                    cast(u.Quantity, h2[~omitted]),
+                    cast(u.Quantity, delta_g[~omitted]),
+                    set_ids=set_ids[~omitted],
+                )
+            except _InsufficientFitData as error:
+                fit_error = str(error)
+            else:
+                predicted, _ = refit.fitted_model.gravity_difference(
+                    transfer_h1, transfer_h2
+                )
+                refit_delta_g = np.ravel(predicted.to_value(u.uGal))
+                observed_heights = refit.observations.h
+                refit_extrapolated = lower_endpoint.lt(
+                    observed_heights.min()
+                ) | upper_endpoint.gt(observed_heights.max())
+
+                predicted, _ = refit.fitted_model.gravity_difference(
+                    cast(u.Quantity, h1[omitted]), cast(u.Quantity, h2[omitted])
+                )
+                held_out_ties.loc[omitted, "predicted_delta_g"] = predicted.to_value(
+                    u.uGal
+                )
+            transfers.append(
+                baseline.assign(
+                    omitted_set_id=set_id,
+                    refit_delta_g=refit_delta_g,
+                    transfer_shift=refit_delta_g - baseline.full_fit_delta_g,
+                    refit_extrapolated=refit_extrapolated,
+                    fit_error=fit_error,
+                )
+            )
+
+        held_out_ties["prediction_error"] = (
+            held_out_ties.predicted_delta_g - held_out_ties.observed_delta_g
+        )
+        comparison = pd.concat(transfers, ignore_index=True)
+        shifts = comparison.transfer_shift.abs()
+        largest = shifts.groupby([comparison.h1, comparison.h2]).transform("max")
+        comparison["is_largest_shift"] = shifts.eq(largest)
+        return comparison, held_out_ties
 
 
 class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
@@ -196,6 +341,35 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
             microgals, and set identifiers ``set_ids``.
         """
         return self._observations.assign(resid=self.residuals)
+
+    def influence_table(self) -> pd.DataFrame:
+        """Return OLS influence diagnostics for the floating observations.
+
+        Returns
+        -------
+        pandas.DataFrame
+            The floating observations with leverage, internally studentized
+            residuals (fitted minus observed), and Cook's distance. The three
+            diagnostics are dimensionless. Studentized residuals and Cook's
+            distance are NaN when undefined, including at unit leverage.
+        """
+        influence = self.regression.get_influence()
+        leverage = influence.hat_matrix_diag
+        with np.errstate(divide="ignore", invalid="ignore"):
+            diagnostics = pd.DataFrame(
+                {
+                    "leverage": leverage,
+                    "studentized_residual": -influence.resid_studentized_internal,
+                    "cooks_distance": influence.cooks_distance[0],
+                },
+                index=self.regression.model.data.row_labels,
+            )
+        columns = ["studentized_residual", "cooks_distance"]
+        values = diagnostics[columns]
+        diagnostics[columns] = values.where(
+            np.isfinite(values) & (leverage[:, None] < 1 - 1e-12)
+        )
+        return self.observations.join(diagnostics)
 
     def plot(
         self,
