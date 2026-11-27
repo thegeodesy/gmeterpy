@@ -6,7 +6,7 @@ import pytest
 
 import gmeterpy.units as u
 from gmeterpy.models import PolynomialVerticalGravity
-from gmeterpy.models.vgrad.floating import FloatingGravityFit
+from gmeterpy.models.vgg.floating import FloatingGravityFit
 
 
 def test_polynomial_gravity_model():

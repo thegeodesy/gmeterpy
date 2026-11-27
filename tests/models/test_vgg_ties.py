@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 import gmeterpy.units as u
-from gmeterpy.models.vgrad.floating import FloatingGravityFit
+from gmeterpy.models.vgg.floating import FloatingGravityFit
 
 
 def test_prepare_observations():

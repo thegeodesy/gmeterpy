@@ -2,7 +2,7 @@
 
 from .atmosphere import atmospheric_pressure_correction, normal_pressure
 from .polar_motion import get_polar_motion, polar_motion_correction
-from .vgrad import PolynomialVerticalGravity
+from .vgg import PolynomialVerticalGravity
 
 __all__ = [
     "PolynomialVerticalGravity",

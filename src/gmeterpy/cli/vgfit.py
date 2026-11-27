@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 import gmeterpy.units as u
-from gmeterpy.models.vgrad.floating import FloatingGravityFit
+from gmeterpy.models.vgg.floating import FloatingGravityFit
 
 
 def main(argv=None):

@@ -64,7 +64,7 @@ class FloatingGravityFit:
 
         Returns
         -------
-        gmeterpy.models.vgrad.floating.FloatingGravityFitResults
+        gmeterpy.models.vgg.floating.FloatingGravityFitResults
             Fitted model and diagnostics for the reconstructed level values.
 
         Raises

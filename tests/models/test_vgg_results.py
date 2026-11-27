@@ -8,11 +8,11 @@ import pandas as pd
 import pytest
 
 import gmeterpy.units as u
-from gmeterpy.models.vgrad import (
+from gmeterpy.models.vgg import (
     FloatingGravityFitResults,
     PolynomialVerticalGravityFitResults,
 )
-from gmeterpy.models.vgrad.floating import FloatingGravityFit
+from gmeterpy.models.vgg.floating import FloatingGravityFit
 
 
 def _fit_ties(data, degree=2):

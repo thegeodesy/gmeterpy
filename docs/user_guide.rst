@@ -164,7 +164,7 @@ The model fits measured gravity differences between reference and target heights
 .. code-block:: python
 
    from gmeterpy import units as u
-   from gmeterpy.models.vgrad.floating import FloatingGravityFit
+   from gmeterpy.models.vgg.floating import FloatingGravityFit
 
    fitter = FloatingGravityFit(degree=2)
    results = fitter.fit(

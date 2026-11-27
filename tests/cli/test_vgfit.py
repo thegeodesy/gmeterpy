@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from gmeterpy.cli.vgfit import main
-from gmeterpy.models.vgrad import FloatingGravityFitResults
+from gmeterpy.models.vgg import FloatingGravityFitResults
 
 
 @pytest.mark.parametrize("station", ["", "Sochi"])
