@@ -381,7 +381,7 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         ylim: tuple[float, float] | list[float] | None = None,
         height_range: tuple[float, float] | list[float] | None = None,
     ) -> "Figure":
-        r"""Plot a fitted vertical gravity model and its uncertainty.
+        r"""Plot the detrended gravity fit and its transfer uncertainty.
 
         Parameters
         ----------
@@ -390,8 +390,9 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         h_ref : float, optional
             Uncertainty reference height in metres. Default is 0.710.
         subtract_gradient : float, optional
-            Linear gradient to subtract in microgals per metre. By default,
-            display the original polynomial without detrending.
+            Linear gradient to subtract in microgals per metre. Defaults
+            to the secant between the lowest observed height and 1 m, or the
+            local gradient at 1 m if those heights coincide.
         xlim : tuple or list of float, optional
             Displayed gravity limits in microgals. Default uses automatic limits.
         ylim : tuple or list of float, optional
@@ -406,27 +407,63 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
             Figure with heights in metres and gravity in microgals.
             The caller is responsible for closing it.
 
+        Raises
+        ------
+        ValueError
+            If coefficient covariance is unavailable.
+
         Notes
         -----
-        With display gradient :math:`s` (zero when omitted), the center
+        With display gradient :math:`s`, the center
         curve is :math:`g(h)-s h` and the observations are plotted at
         :math:`g(h)-s h-v`, where :math:`v` is fitted minus observed.
         The band is centered on the curve with half-width
-        :math:`u\bigl(g(h)-g(h_{\mathrm{ref}})\bigr)`.
+        :math:`u\bigl(g(h)-g(h_{\mathrm{ref}})\bigr)`. The reference height
+        is marked when it lies within the plotted curve's range. Dashed
+        curve segments extend beyond the observed height range.
         """
         import matplotlib.pyplot as plt
 
-        df = self.observations
+        observations = self.observations
         model = self.fitted_model
-
-        gradient = 0 if subtract_gradient is None else subtract_gradient
-        gpr = lambda x: (
-            model.gravity(np.asarray(x) * u.m)[0].to_value(u.uGal) - gradient * x
+        observed_min, observed_max = observations.h.min(), observations.h.max()
+        height_min, height_max = (
+            (observed_min, observed_max)
+            if height_range is None
+            else sorted(height_range)
         )
+        reference_visible = height_min <= h_ref <= height_max
+        heights = np.linspace(height_min, height_max, 100)
+        # Include exact boundaries so the lines meet and the band closes at h_ref.
+        boundaries = [observed_min, observed_max, h_ref]
+        heights = np.union1d(
+            heights,
+            [height for height in boundaries if height_min <= height <= height_max],
+        )
+        _, uncertainty = model.gravity_difference(h_ref * u.m, heights * u.m)
+        if uncertainty is None:
+            raise ValueError("Coefficient covariance is required to plot uncertainty")
+        sigma = np.asarray(uncertainty.to_value(u.uGal), dtype=float)
+
+        gradient = subtract_gradient
+        if gradient is None:
+            if observed_min == 1.0:
+                slope, _ = model.gradient(1.0 * u.m)
+            else:
+                slope, _ = model.mean_gradient(1.0 * u.m, observed_min * u.m)
+            gradient = np.asarray(slope.to_value(u.uGal / u.m), dtype=float).item()
+
+        def display_gravity(heights):
+            return (
+                model.gravity(np.asarray(heights) * u.m)[0].to_value(u.uGal)
+                - gradient * heights
+            )
+
+        fitted_gravity = display_gravity(heights)
 
         fig, ax = plt.subplots(figsize=(6, 7))
         ax.set_ylabel("Height ($m$)", fontsize=12)
-        ax.set_xlabel(r"Gravity ($\mu Gal$)", fontsize=12)
+        ax.set_xlabel(r"Detrended gravity ($\mu$Gal)", fontsize=12)
         if xlim is not None:
             ax.set_xlim(*xlim)
         if ylim is not None:
@@ -435,11 +472,10 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         markers = itertools.cycle(("*", "s", "^", "p", "o", "D"))
         colors = itertools.cycle(("g", "r", "m", "c", "y"))
 
-        # plot source data
-        for _eqn, group in df.groupby("set_ids"):
-            ga = gpr(group.h) - group.resid
+        for _, group in observations.groupby("set_ids"):
+            group = group.sort_values("h", kind="stable")
             ax.plot(
-                ga,
+                display_gravity(group.h) - group.resid,
                 group.h,
                 "--",
                 marker=next(markers),
@@ -449,31 +485,41 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
                 linewidth=1.0,
             )
 
-        # plot curve
-        if height_range is None:
-            height_range = (df.h.min(), df.h.max())
-        height_min, height_max = height_range
-        h = np.linspace(height_min, height_max, 100)
-        fitted_gravity = gpr(h)
-        ax.plot(fitted_gravity, h, "b-", linewidth=2.0)
+        observed = (observed_min <= heights) & (heights <= observed_max)
+        if observed.any():
+            ax.plot(fitted_gravity[observed], heights[observed], "b-", linewidth=2.0)
+        if not observed.all():
+            # Include the observed boundary in each extrapolated segment.
+            extrapolated = ((height_min < observed_min) & (heights <= observed_min)) | (
+                (height_max > observed_max) & (heights >= observed_max)
+            )
+            ax.plot(
+                np.where(extrapolated, fitted_gravity, np.nan),
+                heights,
+                "--",
+                color="0.4",
+                linewidth=1.5,
+                label="Extrapolated fit",
+            )
+        uncertainty_label = f"Standard uncertainty relative to {h_ref:.3f} m"
+        ax.fill_betweenx(
+            heights,
+            fitted_gravity - sigma,
+            fitted_gravity + sigma,
+            color="royalblue",
+            alpha=0.18,
+            label=uncertainty_label,
+        )
+        if reference_visible:
+            ax.axhline(h_ref, color="0.5", linestyle=":", linewidth=1, zorder=1)
 
-        # 1-sigma diff with h_ref height
-        _, uncertainty = model.gravity_difference(h * u.m, h_ref * u.m)
-        if uncertainty is None:
-            raise ValueError("Coefficient covariance is required to plot uncertainty")
-        sigma = uncertainty.to_value(u.uGal)
-        ci_l = fitted_gravity - sigma
-        ci_u = fitted_gravity + sigma
-        ax.plot(ci_l, h, "b", ci_u, h, "b", linestyle="dashed")
-        ax.fill_betweenx(h, ci_l, ci_u, alpha=0.05, color="0.05")
-
-        title = f"{station}"
-        subtitle = f"degree={model.degree}, "
-        if subtract_gradient is not None:
-            subtitle += rf"${gradient:.1f}\,\mu$Gal / m substructed, "
-        subtitle += "$u_{k = 1}$"
-        fig.suptitle(title, fontsize=14, y=0.95)
-        ax.set_title(subtitle, fontsize=12)
+        subtitle = (
+            rf"Degree {model.degree} · ${gradient:.1f}\,\mu$Gal/m subtracted"
+            rf" · Ref. height {h_ref:.3f} m"
+        )
+        if station:
+            fig.suptitle(station, fontsize=14, y=0.95)
+        ax.set_title(subtitle, fontsize=11)
 
         return fig
 

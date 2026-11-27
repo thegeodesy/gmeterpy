@@ -10,6 +10,7 @@ import pytest
 import gmeterpy.units as u
 from gmeterpy.models.vgg import (
     FloatingGravityFitResults,
+    PolynomialVerticalGravity,
     PolynomialVerticalGravityFitResults,
 )
 from gmeterpy.models.vgg.floating import FloatingGravityFit
@@ -308,14 +309,14 @@ def test_plot_leaves_figure_with_caller(quadratic_fit, tmp_path):
         assert ax.get_autoscaley_on()
         curve = ax.lines[2]
         heights = curve.get_ydata()
+        # The secant from 0 to 1 m for g(h) = -300 h + 12 h² is -288 µGal/m.
         np.testing.assert_allclose(
             curve.get_xdata(),
-            quadratic_fit.fitted_model.gravity(np.asarray(heights) * u.m)[0].to_value(
-                u.uGal
-            ),
+            -12 * heights + 12 * heights**2,
+            atol=1e-10,
         )
         np.testing.assert_allclose(heights[[0, -1]], [0, 1.5])
-        assert "substructed" not in ax.get_title()
+        assert ax.get_xlabel().startswith("Detrended gravity")
     finally:
         plt.close(figure)
 
@@ -336,45 +337,100 @@ def test_plot_presentation_options(quadratic_fit):
         assert ax.get_ylim() == (-0.1, 2)
         curve = ax.lines[2]
         heights = curve.get_ydata()
-        np.testing.assert_allclose(heights[[0, -1]], [0, 1.8])
+        np.testing.assert_allclose(heights[[0, -1]], [0, 1.5])
         np.testing.assert_allclose(curve.get_xdata(), 12 * heights**2, atol=1e-10)
+        extrapolated = next(
+            line for line in ax.lines if line.get_label() == "Extrapolated fit"
+        )
+        assert extrapolated.get_linestyle() == "--"
+        extrapolated_heights = extrapolated.get_ydata()[
+            np.isfinite(extrapolated.get_xdata())
+        ]
+        np.testing.assert_allclose(extrapolated_heights[[0, -1]], [1.5, 1.8])
         for line, (_, group) in zip(
             ax.lines[:2], observations.groupby("set_ids"), strict=True
         ):
+            group = group.sort_values("h", kind="stable")
             np.testing.assert_allclose(
                 line.get_xdata(), 12 * group.h**2 - group.resid, atol=1e-10
             )
-        uncertainty = quadratic_fit.fitted_model.gravity_difference(
-            np.asarray(heights) * u.m, np.asarray(0.8) * u.m
-        )[1].to_value(u.uGal)
-        np.testing.assert_allclose(
-            ax.lines[3].get_xdata(), curve.get_xdata() - uncertainty
-        )
-        np.testing.assert_allclose(
-            ax.lines[4].get_xdata(), curve.get_xdata() + uncertainty
-        )
-        assert "-300.0" in ax.get_title()
+        band = ax.collections[0]
+        assert band.get_label() == "Standard uncertainty relative to 0.800 m"
+        vertices = band.get_paths()[0].vertices
+        reference = vertices[vertices[:, 1] == 0.8, 0]
+        assert reference.size > 0
+        np.testing.assert_allclose(reference, 12 * 0.8**2)
+        np.testing.assert_allclose(ax.lines[-1].get_ydata(), [0.8, 0.8])
+        assert ax.get_xlabel().startswith("Detrended gravity")
+        assert "subtracted" in ax.get_title()
+        assert "Ref. height 0.800 m" in ax.get_title()
+        assert "\n" not in ax.get_title()
+        assert not figure.legends
     finally:
         plt.close(figure)
     pd.testing.assert_frame_equal(quadratic_fit.observations, observations)
     np.testing.assert_array_equal(quadratic_fit.fitted_model.coefficients, coefficients)
 
 
+def test_plot_without_covariance_leaves_no_figure(quadratic_fit):
+    result = FloatingGravityFitResults(
+        quadratic_fit.observations,
+        quadratic_fit.regression,
+        PolynomialVerticalGravity(quadratic_fit.fitted_model.coefficients),
+    )
+    figures = plt.get_fignums()
+
+    with pytest.raises(ValueError, match="Coefficient covariance is required"):
+        result.plot()
+
+    assert plt.get_fignums() == figures
+
+
+def test_plot_connects_observations_in_height_order():
+    result = FloatingGravityFit().fit(
+        [0, 0, 0] * u.m,
+        [0.500, 0.501, 1.0] * u.m,
+        [-149, -148, -290] * u.uGal,
+        set_ids=[1, 1, 1],
+    )
+
+    figure = result.plot()
+    try:
+        np.testing.assert_array_equal(
+            figure.axes[0].lines[0].get_ydata(), [0, 0.500, 0.501, 1.0]
+        )
+    finally:
+        plt.close(figure)
+
+
 def test_plot_reconstructs_noisy_observations():
     source = Path(__file__).resolve().parents[2] / "examples/vgfit/sochi.csv"
     result = _fit_ties(pd.read_csv(source))
-    figure = result.plot()
+    figure = result.plot(subtract_gradient=-300)
     try:
+        ax = figure.axes[0]
         groups = list(result.observations.groupby("set_ids"))
-        for line, (run_id, group) in zip(
-            figure.axes[0].lines[: len(groups)], groups, strict=True
-        ):
+        for line, (run_id, group) in zip(ax.lines[: len(groups)], groups, strict=True):
+            group = group.sort_values("h", kind="stable")
             offset = result.params[f"offset[run={run_id}]"]
-            np.testing.assert_allclose(line.get_xdata(), group.g - offset, atol=1e-10)
+            np.testing.assert_allclose(
+                line.get_xdata(), group.g - offset + 300 * group.h, atol=1e-10
+            )
             predicted = offset + result.fitted_model.gravity(np.asarray(group.h) * u.m)[
                 0
             ].to_value(u.uGal)
             np.testing.assert_allclose(group.resid, predicted - group.g, atol=1e-10)
+        height = result.observations.h.min()
+        fitted, _ = result.fitted_model.gravity(height * u.m)
+        _, uncertainty = result.fitted_model.gravity_difference(
+            0.710 * u.m, height * u.m
+        )
+        vertices = ax.collections[0].get_paths()[0].vertices
+        limits = np.unique(vertices[vertices[:, 1] == height, 0])
+        np.testing.assert_allclose(
+            limits,
+            (fitted + np.array([-1, 1]) * uncertainty).to_value(u.uGal) + 300 * height,
+        )
     finally:
         plt.close(figure)
 

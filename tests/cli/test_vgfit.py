@@ -30,8 +30,7 @@ def test_main_writes_station_outputs(tmp_path, monkeypatch, station):
     assert "0.000 --> 1.400 m" in report
 
 
-@pytest.mark.parametrize("detrend", [["--subtract-gradient", "-300"], ["--no-detrend"]])
-def test_plot_options(tmp_path, monkeypatch, detrend):
+def test_plot_options(tmp_path, monkeypatch):
     source = Path(__file__).resolve().parents[2] / "examples/vgfit/sochi.csv"
     plot = FloatingGravityFitResults.plot
     figures = []
@@ -62,17 +61,20 @@ def test_plot_options(tmp_path, monkeypatch, detrend):
             "--height-range",
             "0.1",
             "1.8",
-            *detrend,
+            "--subtract-gradient",
+            "-300",
         ]
     )
 
     ax = figures[0].axes[0]
     assert ax.get_xlim() == (-20, 50)
     assert ax.get_ylim() == (0, 2)
-    curve = next(line for line in ax.lines if line.get_linewidth() == 2)
-    assert curve.get_ydata()[0] == pytest.approx(0.1)
-    assert curve.get_ydata()[-1] == pytest.approx(1.8)
-    assert ("-300.0" in ax.get_title()) == (detrend[0] == "--subtract-gradient")
+    extrapolated = next(
+        line for line in ax.lines if line.get_label() == "Extrapolated fit"
+    )
+    assert extrapolated.get_ydata()[0] == pytest.approx(0.1)
+    assert extrapolated.get_ydata()[-1] == pytest.approx(1.8)
+    assert "-300.0" in ax.get_title()
     assert (tmp_path / "Sochi_all.png").is_file()
     assert not plt.fignum_exists(figures[0].number)
 
@@ -81,7 +83,7 @@ def test_stdin_input(tmp_path, monkeypatch):
     source = Path(__file__).resolve().parents[2] / "examples/vgfit/sochi.csv"
     stream = StringIO(source.read_text())
     monkeypatch.setattr("sys.stdin", stream)
-    main(["-i", "-", "-o", str(tmp_path), "--auto-limits", "--no-detrend"])
+    main(["-i", "-", "-o", str(tmp_path), "--auto-limits"])
     assert not stream.closed
     assert (tmp_path / "_all.png").is_file()
 
@@ -128,13 +130,14 @@ def test_automatic_detrending(tmp_path, monkeypatch, base_mm, expected_gradient)
     source = tmp_path / "ties.csv"
     data.to_csv(source, index=False)
     plot = FloatingGravityFitResults.plot
-    gradients = []
+    titles = []
 
     def capture_plot(result, *args, **kwargs):
-        gradients.append(kwargs["subtract_gradient"])
-        return plot(result, *args, **kwargs)
+        figure = plot(result, *args, **kwargs)
+        titles.append(figure.axes[0].get_title())
+        return figure
 
     monkeypatch.setattr(FloatingGravityFitResults, "plot", capture_plot)
     with np.errstate(divide="raise", invalid="raise"):
         main(["-i", str(source), "-o", str(tmp_path)])
-    assert gradients == pytest.approx([expected_gradient])
+    assert f"{expected_gradient:.1f}" in titles[0]

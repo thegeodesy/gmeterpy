@@ -331,8 +331,7 @@ The command connects input preparation, fitting and output methods:
 The destination directory must exist. This writes ``Sochi_all.png`` and
 ``vg_Sochi_fit_all.txt``. There is no workflow package or ``run`` wrapper.
 
-Command-line presentation options preserve the existing appearance unless
-overridden:
+The command supports these presentation options.
 
 .. list-table::
    :header-rows: 1
@@ -343,10 +342,8 @@ overridden:
      - Uncertainty reference height; 0.710 m
    * - ``--subtract-gradient GRADIENT``
      - Gradient to subtract in microgals/m; automatic secant by default
-   * - ``--no-detrend``
-     - Show the original polynomial; excludes ``--subtract-gradient``
    * - ``--xlim MIN MAX``
-     - Gravity limits in microgals; -10 to 10
+     - Detrended gravity limits in microgals. Defaults to -10 to 10.
    * - ``--ylim MIN MAX``
      - Height limits in metres; 0 to 1.4
    * - ``--auto-limits``
@@ -356,16 +353,16 @@ overridden:
    * - ``-o DIR``, ``--output-dir DIR``
      - Existing output directory; current directory by default
 
-For example, show the original model with automatic limits and a different
-uncertainty reference height:
+To use automatic limits and a different uncertainty reference height, run
+the command with these options.
 
 .. code-block:: console
 
-   vgfit -i measurements.csv -n Sochi --no-detrend --auto-limits --h-ref 0.8
+   vgfit -i measurements.csv -n Sochi --auto-limits --h-ref 0.8
 
-Use ``-i -`` to read CSV from standard input. The command automatically
-subtracts a secant gradient unless an explicit gradient or ``--no-detrend``
-is selected.
+Use ``-i -`` to read CSV from standard input. The plot defaults to subtracting
+the secant gradient between the lowest observed height and 1 m. Supply
+``--subtract-gradient`` to use a different gradient.
 If the lowest observation is exactly 1 m, automatic detrending uses the local
 polynomial derivative there instead of a secant with coincident endpoints.
 
@@ -380,8 +377,8 @@ Callers own figures returned by ``plot``; the command closes its own figure.
 The optional report ``data`` argument preserves the original tie table; if
 omitted, the report includes prepared observations instead.
 
-Library plots show the original polynomial without detrending and use automatic
-axis limits. Presentation options are keyword-only:
+Library plots use the same detrending rule and automatic axis limits.
+You can set the gradient, limits, and other presentation options by keyword.
 
 .. code-block:: python
 
@@ -394,11 +391,13 @@ axis limits. Presentation options are keyword-only:
        height_range=(0, 1.4),  # curve sampling range in metres
    )
 
-``subtract_gradient`` shifts the displayed curve and observations without
-changing the model or its uncertainty. ``height_range`` defaults to the observed
-height range and is independent of the axis limits. the command
-retains their established secant detrending, reference height, curve range, and
-fixed axis limits.
+``subtract_gradient`` shifts the displayed curve and observations.
+``height_range`` defaults to the observed height range and controls where
+the curve is drawn independently of the axis limits. Dashed curve segments
+mark extrapolation beyond the observed heights. The shaded band shows one
+standard uncertainty in the gravity difference from ``h_ref`` to each
+plotted height. A dotted line marks ``h_ref`` when it lies within the curve
+range.
 
 The command leaves other open figures intact and closes its own figure even if
 saving fails. Report formatting does not change pandas display settings.

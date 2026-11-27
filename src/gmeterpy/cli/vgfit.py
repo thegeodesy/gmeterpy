@@ -4,7 +4,6 @@ import argparse
 import sys
 from contextlib import nullcontext
 from pathlib import Path
-from typing import cast
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -40,15 +39,11 @@ def main(argv=None):
         metavar="METRES",
         help="Uncertainty reference height in metres (default: 0.710)",
     )
-    detrend = parser.add_mutually_exclusive_group()
-    detrend.add_argument(
+    parser.add_argument(
         "--subtract-gradient",
         type=float,
         metavar="GRADIENT",
         help="Gradient to subtract in microgals/m (default: automatic secant)",
-    )
-    detrend.add_argument(
-        "--no-detrend", action="store_true", help="Show the original polynomial"
     )
     parser.add_argument(
         "--xlim",
@@ -56,7 +51,7 @@ def main(argv=None):
         nargs=2,
         default=(-10, 10),
         metavar=("MIN", "MAX"),
-        help="Gravity axis limits in microgals (default: -10 10)",
+        help="Detrended gravity limits in microgals (default: -10 10)",
     )
     parser.add_argument(
         "--ylim",
@@ -107,21 +102,10 @@ def main(argv=None):
         data.delta_g.to_numpy(dtype=float) * u.uGal,
         set_ids=data.runn,
     )
-    gradient = args.subtract_gradient
-    if args.no_detrend:
-        gradient = None
-    elif gradient is None:
-        h_min = result.observations.h.min()
-        model = result.fitted_model
-        if h_min == 1.0:
-            slope, _ = model.gradient(1.0 * u.m)
-        else:
-            slope, _ = model.mean_gradient(1.0 * u.m, h_min * u.m)
-        gradient = slope.to_value(u.uGal / u.m)
     figure = result.plot(
         args.name,
         h_ref=args.h_ref,
-        subtract_gradient=cast(float | None, gradient),
+        subtract_gradient=args.subtract_gradient,
         xlim=None if args.auto_limits else args.xlim,
         ylim=None if args.auto_limits else args.ylim,
         height_range=args.height_range,
