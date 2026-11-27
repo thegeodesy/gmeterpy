@@ -204,8 +204,8 @@ observations and the ``plot()`` method.
 identifiers in ``set_ids``, and geodetic residuals (fitted minus observed).
 ``results.parameter_covariance`` contains covariance of all fitted parameters,
 including offsets named ``offset[run=1]``. Each offset is the fitted intercept
-for that set at height zero. The report also shows the set's minimum measured
-height alongside its offset label.
+for that set at height zero. The report uses shorter labels such as
+``offset[1]`` and shows the set's minimum measured height in a separate column.
 Polynomial parameters are labeled ``a1``, ``a2``, and so on.
 ``model.covariance`` returns the polynomial coefficient block as a NumPy
 array in ascending power order, including the off-diagonal terms.
@@ -237,27 +237,31 @@ residual degrees of freedom are determined by the backend model rank.
 Use ``results.influence_table()`` to see leverage, internally studentized
 residuals, and Cook's distance alongside the floating observations.
 Studentized residuals retain the fitted-minus-observed sign.
+The report marks each observation that meets a screening criterion with
+an asterisk in the ``Inspect`` column. The criteria use
+``|studentized residual| > 2``, leverage greater than ``2p/n``, and
+Cook's distance greater than ``4/n``, where ``p`` includes set offsets and
+``n`` is the number of fitted observations. Unit leverage is flagged
+separately because the studentized residual and Cook's distance are undefined
+there. These rules identify observations for inspection.
 
-To check how strongly individual measurement sets affect a gravity
-transfer, refit with each set omitted in turn. The default benchmark is
-the transfer from 1 m to the mark at 0 m.
+To check agreement among measurement sets, predict the original ties in
+each set using a fit to the remaining sets.
 
 .. code-block:: python
 
-   transfers, held_out = fitter.leave_one_set_out(
+   _, held_out = fitter.leave_one_set_out(
        h1=[0, 0, 0, 0, 0, 0] * u.m,
        h2=[0.5, 1.0, 1.5, 0.5, 1.0, 1.5] * u.m,
        delta_g=[-147, -289, -423, -148, -288, -424] * u.uGal,
        set_ids=[1, 1, 1, 2, 2, 2],
    )
-   largest_shift = transfers.loc[transfers.is_largest_shift]
 
-``transfers`` gives each refit's shift from the full-fit transfer and
-flags extrapolation relative to the observations used in each fit.
-Pass ``transfer_h1`` and ``transfer_h2`` to assess a different interval.
 ``held_out`` gives predicted-minus-observed differences for ties excluded
-from each refit. Both are expressed in microgals. When a refit cannot be
-estimated, the transfer table records the reason in ``fit_error``.
+from each refit in microgals. To assess a specific transfer, supply
+``transfer_h1`` and ``transfer_h2``. The first returned table then gives
+each refit's shift from the full-fit transfer, flags extrapolation, and
+records any refit failures in ``fit_error``.
 
 Models can also be created directly from published coefficients:
 
@@ -344,6 +348,10 @@ The command supports these presentation options.
      - Gradient to subtract in microgals/m; automatic secant by default
    * - ``--highlight-set ID``
      - Highlight one measurement set by its ``runn`` value and mute the others
+   * - ``--leave-one-set-out``
+     - Report held-out tie errors by measurement set
+   * - ``--review-note TEXT``
+     - Optional reviewer comments when the report flags an issue
    * - ``--xlim MIN MAX``
      - Detrended gravity limits in microgals. Defaults to -10 to 10.
    * - ``--ylim MIN MAX``
@@ -379,8 +387,26 @@ and the command's report writer.
    write_report(results, "report.txt", station="Sochi", data=data)
 
 Callers own figures returned by ``plot``; the command closes its own figure.
-The optional report ``data`` argument preserves the original tie table; if
-omitted, the report includes prepared observations instead.
+The report starts with the fit summary and its generation timestamp in UTC.
+When diagnostics flag observations or held-out predictions are missing,
+the **Inspection** section follows the fit summary and identifies what to
+check. Its review note shows ``Pending`` until you supply
+``--review-note TEXT`` or pass ``review_note="..."`` to ``write_report()``.
+The transfer model gives the polynomial, gravity difference, and uncertainty
+formulas, base units, and the full-precision coefficient vector and covariance
+matrix. The full fit then lists
+the polynomial coefficients and set offsets with their units, standard
+uncertainties, and full regression covariance. Its entries use products of
+parameter units.
+The report labels input tie heights in millimetres and prepared observation
+heights in metres. Pass the original CLI-format tie table as ``data`` to
+include it, or omit ``data`` to show the prepared observations.
+The prediction table flags pairs outside the observed height range and shows
+nonzero standard uncertainties with two significant digits.
+
+Pass the second table from ``fitter.leave_one_set_out()`` to
+``write_report()`` as ``held_out_ties=held_out``. The leave-one-set-out section shows
+the number of held-out ties and their mean and RMS prediction errors by set.
 
 Library plots use the same detrending rule and automatic axis limits.
 You can set the gradient, limits, and other presentation options by keyword.

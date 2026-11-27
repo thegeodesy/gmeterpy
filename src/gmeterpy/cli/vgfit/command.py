@@ -92,6 +92,16 @@ def main(argv=None):
         help="Degree of the polynomial model (default: 2).",
         metavar="DEGREE",
     )
+    parser.add_argument(
+        "--leave-one-set-out",
+        action="store_true",
+        help="Report held-out tie errors by measurement set",
+    )
+    parser.add_argument(
+        "--review-note",
+        metavar="TEXT",
+        help="Add a note to the report's inspection section when issues are flagged",
+    )
 
     args = parser.parse_args(argv)
     try:
@@ -103,12 +113,19 @@ def main(argv=None):
     except OSError as error:
         parser.error(str(error))
 
-    result = FloatingGravityFit(degree=args.degree).fit(
+    fitter = FloatingGravityFit(degree=args.degree)
+    ties = (
         data.level_1.to_numpy(dtype=float) / 1000 * u.m,
         data.level_2.to_numpy(dtype=float) / 1000 * u.m,
         data.delta_g.to_numpy(dtype=float) * u.uGal,
-        set_ids=data.runn,
     )
+    result = fitter.fit(*ties, set_ids=data.runn)
+    held_out_ties = None
+    if args.leave_one_set_out:
+        try:
+            _, held_out_ties = fitter.leave_one_set_out(*ties, set_ids=data.runn)
+        except ValueError as error:
+            parser.error(str(error))
     try:
         figure = result.plot(
             args.name,
@@ -126,5 +143,10 @@ def main(argv=None):
     finally:
         plt.close(figure)
     write_report(
-        result, args.output_dir / f"vg_{args.name}_fit_all.txt", args.name, data=data
+        result,
+        args.output_dir / f"vg_{args.name}_fit_all.txt",
+        args.name,
+        data=data,
+        held_out_ties=held_out_ties,
+        review_note=args.review_note,
     )

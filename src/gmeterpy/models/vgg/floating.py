@@ -17,6 +17,9 @@ if TYPE_CHECKING:
     from statsmodels.regression.linear_model import RegressionResultsWrapper
 
 
+_UNIT_LEVERAGE = 1.0 - 1e-12
+
+
 class _InsufficientFitData(ValueError):
     """The observations cannot support the requested fit."""
 
@@ -151,10 +154,10 @@ class FloatingGravityFit:
         delta_g: u.Quantity,
         *,
         set_ids: ArrayLike,
-        transfer_h1: u.Quantity = 1 * u.m,
-        transfer_h2: u.Quantity = 0 * u.m,
+        transfer_h1: u.Quantity | None = None,
+        transfer_h2: u.Quantity | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Refit without each set and compare gravity transfers.
+        """Refit without each set and predict its held-out ties.
 
         Parameters
         ----------
@@ -164,9 +167,9 @@ class FloatingGravityFit:
         set_ids : array_like
             One set identifier per tie, with no missing identifiers.
         transfer_h1, transfer_h2 : ~astropy.units.Quantity, optional
-            Initial and final heights for the transfers to compare. Default
-            is 1 m to 0 m. Heights in each pair must differ. Arrays must
-            broadcast.
+            Initial and final heights for optional transfer comparisons.
+            When supplied, arrays must broadcast and heights in each pair
+            must differ.
 
         Returns
         -------
@@ -180,12 +183,18 @@ class FloatingGravityFit:
             respective fit's observed height range.
             ``fit_error`` gives the reason when an omission leaves too little
             data to fit. The refitted difference, shift, and extrapolation
-            flag are missing in that case.
+            flag are missing in that case. The table is empty when no
+            transfer heights are supplied.
         held_out_ties : pandas.DataFrame
             One row per original tie, in input order. Includes its observed
             difference, the prediction from the fit that omitted its set,
             and ``prediction_error`` (predicted minus observed). Predictions
             and errors are NaN when the refit is unavailable.
+
+        Raises
+        ------
+        ValueError
+            If just one transfer height is supplied.
 
         Notes
         -----
@@ -193,11 +202,68 @@ class FloatingGravityFit:
         microgals. The full fit and refits use the same polynomial degree
         and equal weights. Transfer shifts measure sensitivity to set omission.
         """
+        if (transfer_h1 is None) != (transfer_h2 is None):
+            raise ValueError("Supply both transfer heights or omit both")
         set_ids = np.asarray(set_ids)
         if pd.isna(set_ids).any():
             raise ValueError("Every tie must have a set identifier")
 
         full_fit = self.fit(h1, h2, delta_g, set_ids=set_ids)
+        held_out_ties = pd.DataFrame(
+            {
+                "set_ids": set_ids,
+                "h1": h1.to_value(u.m),
+                "h2": h2.to_value(u.m),
+                "observed_delta_g": delta_g.to_value(u.uGal),
+                "predicted_delta_g": np.nan,
+            }
+        )
+        refits = {}
+        fit_errors = {}
+        for set_id in pd.unique(set_ids):
+            omitted = set_ids == set_id
+            try:
+                if omitted.all():
+                    raise _InsufficientFitData("No measurement sets remain")
+                refit = self.fit(
+                    cast(u.Quantity, h1[~omitted]),
+                    cast(u.Quantity, h2[~omitted]),
+                    cast(u.Quantity, delta_g[~omitted]),
+                    set_ids=set_ids[~omitted],
+                )
+            except _InsufficientFitData as error:
+                if transfer_h1 is not None:
+                    fit_errors[set_id] = str(error)
+                continue
+
+            if transfer_h1 is not None:
+                refits[set_id] = refit
+            predicted, _ = refit.fitted_model.gravity_difference(
+                cast(u.Quantity, h1[omitted]), cast(u.Quantity, h2[omitted])
+            )
+            held_out_ties.loc[omitted, "predicted_delta_g"] = predicted.to_value(u.uGal)
+
+        held_out_ties["prediction_error"] = (
+            held_out_ties.predicted_delta_g - held_out_ties.observed_delta_g
+        )
+        if transfer_h1 is None or transfer_h2 is None:
+            return pd.DataFrame(
+                columns=pd.Index(
+                    [
+                        "h1",
+                        "h2",
+                        "full_fit_delta_g",
+                        "full_fit_uncertainty",
+                        "full_fit_extrapolated",
+                        "omitted_set_id",
+                        "refit_delta_g",
+                        "transfer_shift",
+                        "refit_extrapolated",
+                        "fit_error",
+                        "is_largest_shift",
+                    ]
+                )
+            ), held_out_ties
         baseline = (
             full_fit.prediction_table(transfer_h1, transfer_h2)
             .filter(
@@ -223,33 +289,12 @@ class FloatingGravityFit:
             observed_heights.min()
         ) | upper_endpoint.gt(observed_heights.max())
 
-        held_out_ties = pd.DataFrame(
-            {
-                "set_ids": set_ids,
-                "h1": h1.to_value(u.m),
-                "h2": h2.to_value(u.m),
-                "observed_delta_g": delta_g.to_value(u.uGal),
-                "predicted_delta_g": np.nan,
-            }
-        )
         transfers = []
         for set_id in pd.unique(set_ids):
-            omitted = set_ids == set_id
+            refit = refits.get(set_id)
             refit_delta_g = np.full(len(baseline), np.nan)
             refit_extrapolated = None
-            fit_error = None
-            try:
-                if omitted.all():
-                    raise _InsufficientFitData("No measurement sets remain")
-                refit = self.fit(
-                    cast(u.Quantity, h1[~omitted]),
-                    cast(u.Quantity, h2[~omitted]),
-                    cast(u.Quantity, delta_g[~omitted]),
-                    set_ids=set_ids[~omitted],
-                )
-            except _InsufficientFitData as error:
-                fit_error = str(error)
-            else:
+            if refit is not None:
                 predicted, _ = refit.fitted_model.gravity_difference(
                     transfer_h1, transfer_h2
                 )
@@ -259,25 +304,16 @@ class FloatingGravityFit:
                     observed_heights.min()
                 ) | upper_endpoint.gt(observed_heights.max())
 
-                predicted, _ = refit.fitted_model.gravity_difference(
-                    cast(u.Quantity, h1[omitted]), cast(u.Quantity, h2[omitted])
-                )
-                held_out_ties.loc[omitted, "predicted_delta_g"] = predicted.to_value(
-                    u.uGal
-                )
             transfers.append(
                 baseline.assign(
                     omitted_set_id=set_id,
                     refit_delta_g=refit_delta_g,
                     transfer_shift=refit_delta_g - baseline.full_fit_delta_g,
                     refit_extrapolated=refit_extrapolated,
-                    fit_error=fit_error,
+                    fit_error=fit_errors.get(set_id),
                 )
             )
 
-        held_out_ties["prediction_error"] = (
-            held_out_ties.predicted_delta_g - held_out_ties.observed_delta_g
-        )
         comparison = pd.concat(transfers, ignore_index=True)
         shifts = comparison.transfer_shift.abs()
         largest = shifts.groupby([comparison.h1, comparison.h2]).transform("max")
@@ -349,15 +385,18 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         pandas.DataFrame
             The floating observations with leverage, internally studentized
             residuals (fitted minus observed), and Cook's distance. The three
-            diagnostics are dimensionless. Studentized residuals and Cook's
-            distance are NaN when undefined, including at unit leverage.
+            diagnostics are dimensionless. The ``unit_leverage`` flag marks
+            leverage numerically equal to one. Studentized residuals and
+            Cook's distance are NaN when undefined, including at unit leverage.
         """
         influence = self.regression.get_influence()
         leverage = influence.hat_matrix_diag
+        unit_leverage = leverage >= _UNIT_LEVERAGE
         with np.errstate(divide="ignore", invalid="ignore"):
             diagnostics = pd.DataFrame(
                 {
                     "leverage": leverage,
+                    "unit_leverage": unit_leverage,
                     "studentized_residual": -influence.resid_studentized_internal,
                     "cooks_distance": influence.cooks_distance[0],
                 },
@@ -366,7 +405,7 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         columns = ["studentized_residual", "cooks_distance"]
         values = diagnostics[columns]
         diagnostics[columns] = values.where(
-            np.isfinite(values) & (leverage[:, None] < 1 - 1e-12)
+            np.isfinite(values) & (leverage[:, None] < _UNIT_LEVERAGE)
         )
         return self.observations.join(diagnostics)
 

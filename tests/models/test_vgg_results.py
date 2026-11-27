@@ -1,5 +1,7 @@
 """Vertical gravity results and Jaakko Mäkinen's reference fit."""
 
+from ast import literal_eval
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -15,6 +17,8 @@ from gmeterpy.models.vgg import (
     PolynomialVerticalGravityFitResults,
 )
 from gmeterpy.models.vgg.floating import FloatingGravityFit
+
+SOCHI_TIES = Path(__file__).resolve().parents[2] / "examples/vgfit/sochi.csv"
 
 
 def _fit_ties(data, degree=2):
@@ -141,7 +145,7 @@ def test_influence_table_uses_geodetic_residuals():
     np.testing.assert_allclose(table.cooks_distance, influence.cooks_distance[0])
 
 
-def test_influence_table_handles_unit_leverage():
+def test_influence_table_handles_unit_leverage(tmp_path):
     result = FloatingGravityFit().fit(
         [0, 0, 0, 0] * u.m,
         [0.5, 0.5, 0.5, 1.0] * u.m,
@@ -156,11 +160,18 @@ def test_influence_table_handles_unit_leverage():
     assert np.isnan(target.studentized_residual)
     assert np.isnan(target.cooks_distance)
 
+    path = tmp_path / "report.txt"
+    assert target.unit_leverage
+    write_report(result, path)
+    assert any(
+        row.split()[-3:] == ["n/a", "n/a", "*"]
+        for row in path.read_text(encoding="utf-8").splitlines()
+    )
+
 
 @pytest.mark.parametrize("rename_runs", [False, True])
 def test_fit_is_invariant_to_input_order_and_run_names(rename_runs):
-    source = Path(__file__).resolve().parents[2] / "examples/vgfit/sochi.csv"
-    data = pd.read_csv(source)
+    data = pd.read_csv(SOCHI_TIES)
     expected = _fit_ties(data)
     shuffled = data.sample(frac=1, random_state=12)
     names = {
@@ -300,6 +311,87 @@ def test_report_preserves_pandas_formatting(quadratic_fit, tmp_path):
         assert pd.get_option("display.float_format") is formatter
 
 
+def test_report_starts_with_fit_summary(quadratic_fit, tmp_path):
+    path = tmp_path / "report.txt"
+    started = datetime.now(UTC).replace(microsecond=0)
+    write_report(quadratic_fit, path)
+
+    report = path.read_text(encoding="utf-8")
+    summary = report.split("Fit summary:\n", 1)[1].split("\n\n", 1)[0]
+    timestamp = summary.splitlines()[1].removeprefix("Generated at").strip()
+    generated = datetime.fromisoformat(timestamp)
+    assert generated.utcoffset() == timedelta(0)
+    assert started <= generated <= datetime.now(UTC)
+    summary = " ".join(summary.split())
+    assert "Method Floating gravity OLS" in summary
+    assert "Observed height range 0.000 to 1.500 m" in summary
+    assert "Input ties 6 Measurement sets 2 Fitted level observations 8" in summary
+    assert (
+        f"Residual standard deviation {quadratic_fit.s0:.3g} uGal "
+        f"Sum of squared residuals {quadratic_fit.regression.ssr:.6g} uGal^2" in summary
+    )
+    assert "Attention" not in summary
+    assert report.index("Fit summary:") < report.index("Transfer model:")
+
+
+def test_report_lists_full_fit_and_recreates_transfer_model(quadratic_fit, tmp_path):
+    path = tmp_path / "report.txt"
+    write_report(quadratic_fit, path)
+
+    report = path.read_text(encoding="utf-8")
+    transfer_section, full_fit = report.split("Transfer model:\n", 1)[1].split(
+        "\n\nFull fit:\n", 1
+    )
+    assert "Units (gravity, height)  uGal, m" in transfer_section
+    assert "a = [a0, a1, a2]" in transfer_section
+    assert "g(h) = [1, h, h^2] @ a" in transfer_section
+    assert "d = [0, h2 - h1, h2^2 - h1^2]" in transfer_section
+    assert "delta_g(h1, h2) = g(h2) - g(h1) = d @ a" in transfer_section
+    assert "u(delta_g) = sqrt(d @ C @ d.T)" in transfer_section
+    vector, matrix = transfer_section.rsplit("\na = ", 1)[1].split("\nC = ", 1)
+    coefficients = literal_eval(vector)
+    covariance = literal_eval(matrix)
+    recreated = PolynomialVerticalGravity(coefficients, covariance, units=(u.uGal, u.m))
+    np.testing.assert_array_equal(
+        recreated.coefficients, quadratic_fit.fitted_model.coefficients
+    )
+    np.testing.assert_array_equal(
+        recreated.covariance, quadratic_fit.fitted_model.covariance
+    )
+
+    model_section, covariance_section, _ = full_fit.split("\n\n", 2)
+    assert "Floating gravity = gravity polynomial + set offset" not in model_section
+    rows = [line.split() for line in model_section.splitlines()[2:]]
+    assert rows[:3] == [
+        ["a0", "0", "fixed", "uGal"],
+        ["a1", "-300", f"{quadratic_fit.sigma['a1']:.6g}", "uGal/m"],
+        ["a2", "12", f"{quadratic_fit.sigma['a2']:.6g}", "uGal/m^2"],
+    ]
+    for run, row in enumerate(rows[3:], start=1):
+        name = f"offset[run={run}]"
+        assert row == [
+            f"offset[{run}]",
+            "0.000",
+            f"{quadratic_fit.params[name]:.6g}",
+            f"{quadratic_fit.sigma[name]:.6g}",
+            "uGal",
+        ]
+    assert len(rows) == 5
+    assert covariance_section.startswith("Full covariance matrix\n")
+    covariance_rows = [line.split() for line in covariance_section.splitlines()[2:]]
+    labels = ["offset[1]", "offset[2]", "a1", "a2"]
+    assert covariance_rows[0] == labels
+    assert [row[0] for row in covariance_rows[1:]] == labels
+    np.testing.assert_allclose(
+        np.array([row[1:] for row in covariance_rows[1:]], dtype=float),
+        quadratic_fit.parameter_covariance.to_numpy(),
+        rtol=5e-6,
+    )
+    assert "h (m)" in report
+    assert "g (uGal)" in report
+    assert "resid (uGal)" in report
+
+
 def test_plot_leaves_figure_with_caller(quadratic_fit, tmp_path):
     figure = quadratic_fit.plot()
     try:
@@ -405,8 +497,7 @@ def test_plot_connects_observations_in_height_order():
 
 
 def test_plot_reconstructs_noisy_observations():
-    source = Path(__file__).resolve().parents[2] / "examples/vgfit/sochi.csv"
-    result = _fit_ties(pd.read_csv(source))
+    result = _fit_ties(pd.read_csv(SOCHI_TIES))
     figure = result.plot(subtract_gradient=-300)
     try:
         ax = figure.axes[0]

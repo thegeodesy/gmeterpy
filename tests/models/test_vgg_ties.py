@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 import gmeterpy.units as u
+from gmeterpy.cli.vgfit.report import write_report
 from gmeterpy.models.vgg.floating import FloatingGravityFit
 
 
@@ -100,20 +101,24 @@ def test_leave_one_set_out_compares_transfers_and_predicts_original_ties():
     assert held_out.prediction_error.tolist() == pytest.approx([-10, 10, -20, 20])
 
 
-def test_leave_one_set_out_defaults_to_transfer_to_the_mark():
-    transfers, _ = FloatingGravityFit(degree=1).leave_one_set_out(
-        [0, 0, 0.25, 0.25] * u.m,
-        [0.5, 1, 0.5, 1] * u.m,
-        [-150, -300, -80, -240] * u.uGal,
-        set_ids=["A", "A", "B", "B"],
+def test_report_shows_held_out_ties_without_transfer_heights(tmp_path):
+    fitter = FloatingGravityFit(degree=1)
+    ties = (
+        [0, 0, 2, 2] * u.m,
+        [0.5, 1, 2.5, 3] * u.m,
+        [-150, -300, -160, -320] * u.uGal,
     )
+    set_ids = [1, 1, 2, 2]
 
-    assert transfers.h1.tolist() == [1, 1]
-    assert transfers.h2.tolist() == [0, 0]
-    assert transfers.refit_delta_g.tolist() == pytest.approx([320, 300])
-    assert not transfers.full_fit_extrapolated.any()
-    assert transfers.refit_extrapolated.tolist() == [True, False]
-    assert transfers.loc[transfers.is_largest_shift, "omitted_set_id"].tolist() == ["A"]
+    transfers, held_out = fitter.leave_one_set_out(*ties, set_ids=set_ids)
+
+    assert transfers.empty
+    assert held_out.prediction_error.tolist() == pytest.approx([-10, -20, 10, 20])
+    path = tmp_path / "report.txt"
+    result = fitter.fit(*ties, set_ids=set_ids)
+    write_report(result, path, held_out_ties=held_out)
+    report = path.read_text(encoding="utf-8")
+    assert "Held-out tie errors (predicted minus observed)" in report
 
 
 def test_leave_one_set_out_flags_refit_without_residual_degrees_of_freedom():
