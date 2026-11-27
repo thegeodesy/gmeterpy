@@ -46,6 +46,11 @@ def main(argv=None):
         help="Gradient to subtract in microgals/m (default: automatic secant)",
     )
     parser.add_argument(
+        "--highlight-set",
+        metavar="ID",
+        help="Highlight one measurement set and mute the others",
+    )
+    parser.add_argument(
         "--xlim",
         type=float,
         nargs=2,
@@ -102,14 +107,18 @@ def main(argv=None):
         data.delta_g.to_numpy(dtype=float) * u.uGal,
         set_ids=data.runn,
     )
-    figure = result.plot(
-        args.name,
-        h_ref=args.h_ref,
-        subtract_gradient=args.subtract_gradient,
-        xlim=None if args.auto_limits else args.xlim,
-        ylim=None if args.auto_limits else args.ylim,
-        height_range=args.height_range,
-    )
+    try:
+        figure = result.plot(
+            args.name,
+            h_ref=args.h_ref,
+            subtract_gradient=args.subtract_gradient,
+            xlim=None if args.auto_limits else args.xlim,
+            ylim=None if args.auto_limits else args.ylim,
+            height_range=args.height_range,
+            highlight_set=args.highlight_set,
+        )
+    except ValueError as error:
+        parser.error(str(error))
     try:
         figure.savefig(args.output_dir / f"{args.name}_all.png")
     finally:

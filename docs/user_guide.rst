@@ -342,6 +342,8 @@ The command supports these presentation options.
      - Uncertainty reference height; 0.710 m
    * - ``--subtract-gradient GRADIENT``
      - Gradient to subtract in microgals/m; automatic secant by default
+   * - ``--highlight-set ID``
+     - Highlight one measurement set by its ``runn`` value and mute the others
    * - ``--xlim MIN MAX``
      - Detrended gravity limits in microgals. Defaults to -10 to 10.
    * - ``--ylim MIN MAX``
@@ -398,6 +400,9 @@ mark extrapolation beyond the observed heights. The shaded band shows one
 standard uncertainty in the gravity difference from ``h_ref`` to each
 plotted height. A dotted line marks ``h_ref`` when it lies within the curve
 range.
+
+Use ``results.plot(highlight_set=1)`` to inspect set 1. The same option is
+available on the command line as ``--highlight-set 1``.
 
 The command leaves other open figures intact and closes its own figure even if
 saving fails. Report formatting does not change pandas display settings.

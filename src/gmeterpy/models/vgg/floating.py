@@ -380,6 +380,7 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         xlim: tuple[float, float] | list[float] | None = None,
         ylim: tuple[float, float] | list[float] | None = None,
         height_range: tuple[float, float] | list[float] | None = None,
+        highlight_set: str | int | None = None,
     ) -> "Figure":
         r"""Plot the detrended gravity fit and its transfer uncertainty.
 
@@ -400,6 +401,9 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         height_range : tuple or list of float, optional
             Height range in metres over which to sample the model curve.
             Default is the observed height range.
+        highlight_set : str or int, optional
+            Set identifier to highlight. Other sets are muted. Identifiers
+            can be supplied as displayed in the report.
 
         Returns
         -------
@@ -410,7 +414,7 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         Raises
         ------
         ValueError
-            If coefficient covariance is unavailable.
+            If the specified set is absent or coefficient covariance is unavailable.
 
         Notes
         -----
@@ -425,6 +429,11 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         import matplotlib.pyplot as plt
 
         observations = self.observations
+        sets = observations.groupby("set_ids")
+        highlighted_id = None if highlight_set is None else str(highlight_set)
+        if highlighted_id is not None and highlighted_id not in map(str, sets.groups):
+            raise ValueError(f"Unknown measurement set {highlighted_id!r}")
+
         model = self.fitted_model
         observed_min, observed_max = observations.h.min(), observations.h.max()
         height_min, height_max = (
@@ -472,17 +481,21 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         markers = itertools.cycle(("*", "s", "^", "p", "o", "D"))
         colors = itertools.cycle(("g", "r", "m", "c", "y"))
 
-        for _, group in observations.groupby("set_ids"):
+        for set_id, group in sets:
             group = group.sort_values("h", kind="stable")
+            color = next(colors)
+            highlighted = str(set_id) == highlighted_id
+            muted = highlighted_id is not None and not highlighted
             ax.plot(
                 display_gravity(group.h) - group.resid,
                 group.h,
                 "--",
                 marker=next(markers),
-                color=next(colors),
+                color="0.5" if muted else color,
                 markersize=10,
-                alpha=0.8,
-                linewidth=1.0,
+                alpha=0.25 if muted else 0.8,
+                linewidth=1.8 if highlighted else 1.0,
+                zorder=4 if highlighted else 2,
             )
 
         observed = (observed_min <= heights) & (heights <= observed_max)
@@ -517,8 +530,15 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
             rf"Degree {model.degree} · ${gradient:.1f}\,\mu$Gal/m subtracted"
             rf" · Ref. height {h_ref:.3f} m"
         )
-        if station:
-            fig.suptitle(station, fontsize=14, y=0.95)
+        title = station
+        if highlighted_id is not None:
+            title = (
+                f"{station} · Set {highlighted_id}"
+                if station
+                else f"Set {highlighted_id}"
+            )
+        if title:
+            fig.suptitle(title, fontsize=14, y=0.95)
         ax.set_title(subtitle, fontsize=11)
 
         return fig

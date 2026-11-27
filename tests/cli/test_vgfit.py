@@ -63,6 +63,8 @@ def test_plot_options(tmp_path, monkeypatch):
             "1.8",
             "--subtract-gradient",
             "-300",
+            "--highlight-set",
+            "2",
         ]
     )
 
@@ -75,6 +77,10 @@ def test_plot_options(tmp_path, monkeypatch):
     assert extrapolated.get_ydata()[0] == pytest.approx(0.1)
     assert extrapolated.get_ydata()[-1] == pytest.approx(1.8)
     assert "-300.0" in ax.get_title()
+    set_one, set_two = ax.lines[:2]
+    assert set_two.get_alpha() > set_one.get_alpha()
+    assert set_two.get_zorder() > set_one.get_zorder()
+    assert figures[0].texts[0].get_text() == "Sochi · Set 2"
     assert (tmp_path / "Sochi_all.png").is_file()
     assert not plt.fignum_exists(figures[0].number)
 
