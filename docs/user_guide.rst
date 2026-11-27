@@ -159,24 +159,40 @@ processing or systematic effects are
 not modelled. Per-tie ``std`` values are retained for provenance and reporting,
 but do not supply weights.
 
-The model fits measured gravity differences between reference and target heights.
+The :download:`full Table 1 transcription <../examples/vgfit/makinen2010_table1.csv>`
+preserves all nine rows and all ten columns, including the reported mean
+gradients and standard errors. The source table gives heights in metres
+above the top of the station marker and one-sigma errors from statistical
+scatter.
+
+For the fit, select the seven ties from the lowest height in each set.
+The 0.788 to 1.311 m differences in sets 4 and 5 (−214.1 and −212.5 µGal)
+are already determined by the two differences from 0.049 m within their
+respective sets.
 
 .. code-block:: python
+
+   import pandas as pd
 
    from gmeterpy import units as u
    from gmeterpy.models.vgg.floating import FloatingGravityFit
 
+   table = pd.read_csv("makinen2010_table1.csv")
+   lowest = table.groupby("set")["lower_height_m"].transform("min")
+   ties = table.loc[table.lower_height_m == lowest]
+   h1 = ties.lower_height_m.to_numpy() * u.m
+   h2 = ties.upper_height_m.to_numpy() * u.m
+   delta_g = ties.gravity_difference_ugal.to_numpy() * u.uGal
+
    fitter = FloatingGravityFit(degree=2)
-   results = fitter.fit(
-       h1=[0, 0, 0] * u.m,
-       h2=[0.5, 1.0, 1.5] * u.m,
-       delta_g=[-147, -288, -423] * u.uGal,
-       set_ids=[1, 1, 1],
-   )
+   results = fitter.fit(h1, h2, delta_g, set_ids=ties["set"])
    model = results.fitted_model
    gravity_changes, gravity_uncertainty = model.gravity([0.5, 1.0] * u.m)
-   difference, uncertainty = model.gravity_difference(0.5 * u.m, 1.0 * u.m)
+   difference, uncertainty = model.gravity_difference(1.200 * u.m, 0.050 * u.m)
    gradient, gradient_uncertainty = model.gradient(0.7 * u.m)
+
+The transfer from 1.200 m to 0.050 m gives about 483.2 µGal with a standard
+uncertainty of 1.8 µGal.
 
 Model evaluation methods return a ``(value, uncertainty)`` tuple. Both
 entries are quantities in the same units when coefficient covariance is
@@ -250,12 +266,7 @@ each set using a fit to the remaining sets.
 
 .. code-block:: python
 
-   _, held_out = fitter.leave_one_set_out(
-       h1=[0, 0, 0, 0, 0, 0] * u.m,
-       h2=[0.5, 1.0, 1.5, 0.5, 1.0, 1.5] * u.m,
-       delta_g=[-147, -289, -423, -148, -288, -424] * u.uGal,
-       set_ids=[1, 1, 1, 2, 2, 2],
-   )
+   _, held_out = fitter.leave_one_set_out(h1, h2, delta_g, set_ids=ties["set"])
 
 ``held_out`` gives predicted-minus-observed differences for ties excluded
 from each refit in microgals. To assess a specific transfer, supply
@@ -326,14 +337,32 @@ the potential difference by :math:`-c(h_2-h_1)`.
 To evaluate gravity relative to a chosen height, use
 ``gravity_difference(h0, heights)``.
 
-The command connects input preparation, fitting and output methods:
+To run the command, write the selected ties with the CLI column names
+and convert the heights from metres to millimetres.
+
+.. code-block:: python
+
+   from pathlib import Path
+
+   data = pd.DataFrame(
+       {
+           "runn": ties["set"],
+           "level_1": h1.to_value(u.mm),
+           "level_2": h2.to_value(u.mm),
+           "delta_g": ties.gravity_difference_ugal,
+           "std": ties.gravity_standard_error_ugal,
+       }
+   )
+   output = Path("output")
+   output.mkdir(exist_ok=True)
+   data.to_csv(output / "makinen2010_ties.csv", index=False)
 
 .. code-block:: console
 
-   vgfit -i measurements.csv -n Sochi -d 2 -o output
+   vgfit -i output/makinen2010_ties.csv -n Makinen2010 -d 2 -o output
 
-The destination directory must exist. This writes ``Sochi_all.png`` and
-``vg_Sochi_fit_all.txt``. There is no workflow package or ``run`` wrapper.
+This writes ``output/Makinen2010_all.png`` and
+``output/vg_Makinen2010_fit_all.txt``.
 
 The command supports these presentation options.
 
@@ -368,7 +397,7 @@ the command with these options.
 
 .. code-block:: console
 
-   vgfit -i measurements.csv -n Sochi --auto-limits --h-ref 0.8
+   vgfit -i output/makinen2010_ties.csv -n Makinen2010 -o output --auto-limits --h-ref 0.8
 
 Use ``-i -`` to read CSV from standard input. The plot defaults to subtracting
 the secant gradient between the lowest observed height and 1 m. Supply
@@ -383,8 +412,8 @@ and the command's report writer.
 
    from gmeterpy.cli.vgfit.report import write_report
 
-   figure = results.plot(station="Sochi")
-   write_report(results, "report.txt", station="Sochi", data=data)
+   figure = results.plot(station="Makinen2010")
+   write_report(results, "report.txt", station="Makinen2010", data=data)
 
 Callers own figures returned by ``plot``; the command closes its own figure.
 The report starts with the fit summary and its generation timestamp in UTC.
@@ -414,9 +443,9 @@ You can set the gradient, limits, and other presentation options by keyword.
 .. code-block:: python
 
    figure = results.plot(
-       station="Sochi",
+       station="Makinen2010",
        h_ref=0.710,
-       subtract_gradient=-300,  # microgals per metre
+       subtract_gradient=-420,  # microgals per metre
        xlim=(-10, 10),         # microgals
        ylim=(0, 1.4),          # metres
        height_range=(0, 1.4),  # curve sampling range in metres

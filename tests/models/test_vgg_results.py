@@ -18,7 +18,7 @@ from gmeterpy.models.vgg import (
 )
 from gmeterpy.models.vgg.floating import FloatingGravityFit
 
-SOCHI_TIES = Path(__file__).resolve().parents[2] / "examples/vgfit/sochi.csv"
+SOCHI_TIES = Path(__file__).resolve().parents[1] / "data/sochi.csv"
 
 
 def _fit_ties(data, degree=2):
@@ -212,19 +212,18 @@ def test_fit_is_invariant_to_input_order_and_run_names(rename_runs):
 def test_jaakko_makinen_2010_polynomial_fit_ties():
     # Table 1, using one reference per set. The other two differences in
     # sets 4 and 5 are implied by these level values, not extra observations.
-    data = pd.DataFrame(
-        [
-            (1, 47, 982, -398.0, 0.9),
-            (2, 47, 982, -396.4, 0.7),
-            (3, 47, 982, -402.1, 2.3),
-            (4, 49, 788, -312.9, 1.6),
-            (4, 49, 1311, -527.0, 1.6),
-            (5, 49, 788, -311.5, 1.3),
-            (5, 49, 1311, -524.0, 1.4),
-        ],
-        columns=["runn", "level_1", "level_2", "delta_g", "std"],
+    source = (
+        Path(__file__).resolve().parents[2] / "examples/vgfit/makinen2010_table1.csv"
     )
-    result = _fit_ties(data)
+    table = pd.read_csv(source)
+    lowest = table.groupby("set")["lower_height_m"].transform("min")
+    ties = table.loc[table.lower_height_m == lowest]
+    result = FloatingGravityFit(degree=2).fit(
+        ties.lower_height_m.to_numpy() * u.m,
+        ties.upper_height_m.to_numpy() * u.m,
+        ties.gravity_difference_ugal.to_numpy() * u.uGal,
+        set_ids=ties["set"],
+    )
 
     # Section 5 / Fig. 2a: published coefficients and one-sigma errors.
     np.testing.assert_allclose(

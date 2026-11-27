@@ -15,7 +15,7 @@ import pytest
 from gmeterpy.cli.vgfit.command import main
 from gmeterpy.models.vgg import FloatingGravityFitResults
 
-SOCHI_TIES = Path(__file__).resolve().parents[2] / "examples/vgfit/sochi.csv"
+SOCHI_TIES = Path(__file__).resolve().parents[1] / "data/sochi.csv"
 
 
 @pytest.mark.parametrize(
