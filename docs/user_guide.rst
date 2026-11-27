@@ -198,7 +198,7 @@ several datasets.
 The fitted polynomial, regression diagnostics, and ``prediction_table(h1, h2)``
 are available on ``PolynomialVerticalGravityFitResults``. The Mäkinen fit
 returns ``FloatingGravityFitResults``, which also provides the prepared floating
-observations and the ``plot()`` and ``report()`` methods.
+observations and the ``plot()`` method.
 
 ``results.observations`` contains heights in metres, gravity in microgals, set
 identifiers in ``set_ids``, and geodetic residuals (fitted minus observed).
@@ -368,12 +368,15 @@ the secant gradient between the lowest observed height and 1 m. Supply
 If the lowest observation is exactly 1 m, automatic detrending uses the local
 polynomial derivative there instead of a secant with coincident endpoints.
 
-For individual outputs, use the result methods:
+To generate individual outputs from Python, use the result's plot method
+and the command's report writer.
 
 .. code-block:: python
 
+   from gmeterpy.cli.vgfit.report import write_report
+
    figure = results.plot(station="Sochi")
-   results.report("report.txt", station="Sochi", data=data)
+   write_report(results, "report.txt", station="Sochi", data=data)
 
 Callers own figures returned by ``plot``; the command closes its own figure.
 The optional report ``data`` argument preserves the original tie table; if

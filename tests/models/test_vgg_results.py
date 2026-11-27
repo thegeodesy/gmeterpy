@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 import gmeterpy.units as u
+from gmeterpy.cli.vgfit.report import write_report
 from gmeterpy.models.vgg import (
     FloatingGravityFitResults,
     PolynomialVerticalGravity,
@@ -295,7 +296,7 @@ def test_results_prepare_model_outputs(quadratic_fit, degree):
 def test_report_preserves_pandas_formatting(quadratic_fit, tmp_path):
     formatter = "{:.8e}".format
     with pd.option_context("display.float_format", formatter):
-        quadratic_fit.report(tmp_path / "report.txt")
+        write_report(quadratic_fit, tmp_path / "report.txt")
         assert pd.get_option("display.float_format") is formatter
 
 

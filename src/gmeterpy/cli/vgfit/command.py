@@ -11,6 +11,8 @@ import pandas as pd
 import gmeterpy.units as u
 from gmeterpy.models.vgg.floating import FloatingGravityFit
 
+from .report import write_report
+
 
 def main(argv=None):
     """Fit vertical gravity ties and write the station outputs."""
@@ -123,4 +125,6 @@ def main(argv=None):
         figure.savefig(args.output_dir / f"{args.name}_all.png")
     finally:
         plt.close(figure)
-    result.report(args.output_dir / f"vg_{args.name}_fit_all.txt", args.name, data=data)
+    write_report(
+        result, args.output_dir / f"vg_{args.name}_fit_all.txt", args.name, data=data
+    )

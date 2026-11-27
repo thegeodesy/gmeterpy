@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from gmeterpy.cli.vgfit import main
+from gmeterpy.cli.vgfit.command import main
 from gmeterpy.models.vgg import FloatingGravityFitResults
 
 

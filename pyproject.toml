@@ -54,7 +54,7 @@ gabl = "gmeterpy.cli.gabl:main"
 gphone = "gmeterpy.cli.gphone:main"
 loop = "gmeterpy.cli.loop:main"
 scx2 = "gmeterpy.cli.scx2:main"
-vgfit = "gmeterpy.cli.vgfit:main"
+vgfit = "gmeterpy.cli.vgfit.command:main"
 
 [project.urls]
 Homepage = "https://github.com/thegeodesy/gmeterpy"
