@@ -14,6 +14,7 @@ from .polynomial import PolynomialVerticalGravity, PolynomialVerticalGravityFitR
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
+    from statsmodels.iolib.summary2 import Summary
     from statsmodels.regression.linear_model import RegressionResultsWrapper
 
 
@@ -395,6 +396,21 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
             microgals, and set identifiers ``set_ids``.
         """
         return self._observations.assign(resid=self.residuals)
+
+    def summary(self, *, alpha: float = 0.05) -> "Summary":
+        """Return the statsmodels summary for the floating-gravity OLS fit.
+
+        Parameters
+        ----------
+        alpha : float, optional
+            Significance level for the parameter confidence intervals.
+
+        Returns
+        -------
+        statsmodels.iolib.summary2.Summary
+            Regression summary with parameter estimates and fit statistics.
+        """
+        return self.regression.summary2(alpha=alpha)
 
     def influence_table(self) -> pd.DataFrame:
         """Return OLS influence diagnostics for the floating observations.

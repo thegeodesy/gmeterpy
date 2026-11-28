@@ -250,6 +250,10 @@ Diagnostics are inherited from ``gmeterpy.numerics.statistics.FitResults``:
 ``degrees_of_freedom`` and ``s0``. Parameter counts include constants, and
 residual degrees of freedom are determined by the backend model rank.
 
+Use ``display(results.summary())`` in a notebook to see the statsmodels
+regression summary. Parameter confidence intervals default to 95%.
+Pass ``alpha=0.10`` for 90% intervals.
+
 Use ``results.influence_table()`` to see leverage, internally studentized
 residuals, and Cook's distance alongside the floating observations.
 Studentized residuals retain the fitted-minus-observed sign.
