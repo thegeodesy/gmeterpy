@@ -110,11 +110,10 @@ difference, and standard uncertainty use the following notation.
 Here :math:`C_a` denotes coefficient covariance. The fixed constant has zero
 variance and covariance, so its row and column are zero in the model.
 
-The input represents each set using a common reference level: supply differences
-from ``level_1`` to the other levels. Do not include redundant pairwise
-differences as additional observations. For the three-level sets in Table 1,
-the two differences from the lowest level define all three floating values;
-the difference between the upper levels is already implied.
+The tie input uses one reference level per set. Supply the difference
+from that reference to each target level. When all differences come from
+the same adjusted level values, the two reference ties in a three-level
+set already determine the third difference.
 
 This is the polynomial-fitting step only. Pier attraction modelling and the
 remove–restore procedure discussed elsewhere in the paper are not implemented.
@@ -130,34 +129,47 @@ as required by the paper.
    Table 1, and Fig. 2a.
 
 The ``vgfit`` command fits a polynomial to gravity differences measured at
-different heights. Its input table requires ``runn`` (measurement run),
-``level_1`` and ``level_2`` (heights in millimetres), and ``delta_g``
-(gravity at level_2 minus gravity at level_1, in microgals).
+different heights. It uses the same field names as the Python fitter.
+``set_id`` identifies the measurement set, ``h1`` and ``h2`` give the
+reference and target heights, and ``delta_g`` is gravity at ``h2`` minus
+gravity at ``h1``. Legacy CSV headers ``runn``, ``level_1``, and ``level_2``
+are accepted for fields where the Python name is absent. Use ``--columns``
+to specify other headers or override these defaults.
 
-Each run uses a single ``level_1`` reference height. Additional columns are
-preserved but do not affect the fit, including ``std``.
+Choose ``set_id`` according to how the ties were reduced. Ties derived from
+one set of adjusted gravity levels share an ID. For example, if levels
+A, B, and C were adjusted together, give the A-to-B and A-to-C ties the
+same ID and put A in ``h1`` for both. Those two ties already determine
+the B-to-C difference. Give separately reduced ties different IDs, even
+when they were collected during the same field visit.
 
-CSV units are fixed conventions: input heights are
-converted from millimetres to metres once, and gravity remains in microgals.
-Units are not inferred from values or table metadata. The input table is not
-modified. Polynomial coefficient n is in microgals per metre to the power n;
-covariance entries have the product of the corresponding coefficient units.
+The fit estimates a separate offset for each ID and assumes no correlation
+between sets. Additional columns, including ``std``, are preserved for
+reporting.
+
+The CSV defaults to millimetres for both heights and microgals for gravity
+differences. Set ``--height-unit`` and ``--gravity-unit`` to match the units
+of your source data. The fitter converts to metres and microgals, and the
+report prints the source table in its supplied units. Polynomial coefficient
+n is in microgals per metre to the power n. Covariance entries use the
+product of the corresponding coefficient units.
 
 The fit uses statsmodels OLS with equal weights, following the paper.
 
-An optional ``std`` column describes the uncertainty of each processed tie's
-final gravity difference, in microgals. It does not describe correlations
-between ties processed together. Run membership and individual uncertainties
-alone do not determine those correlations, which may be unavailable for
-historical data.
+An optional ``std`` column gives the standard uncertainty of each processed
+tie's final gravity difference, in the source gravity unit. The set IDs describe which
+ties share adjusted levels. Estimating a covariance matrix for the ties
+would require more information about the original adjustment.
 
 Equal weighting is the default because small differences in reported tie
 uncertainties may not justify different weights, particularly across processing
 methods or historical datasets. The floating formulation accounts for the
-shared-level structure within each run. Additional correlations from prior
+shared-level structure within each set. Additional correlations from prior
 processing or systematic effects are
 not modelled. Per-tie ``std`` values are retained for provenance and reporting,
 but do not supply weights.
+
+.. rubric:: Preparing the Aboa ties
 
 The :download:`full Table 1 transcription <../examples/vgfit/makinen2010_table1.csv>`
 preserves all nine rows and all ten columns, including the reported mean
@@ -165,10 +177,33 @@ gradients and standard errors. The source table gives heights in metres
 above the top of the station marker and one-sigma errors from statistical
 scatter.
 
-For the fit, select the seven ties from the lowest height in each set.
-The 0.788 to 1.311 m differences in sets 4 and 5 (−214.1 and −212.5 µGal)
-are already determined by the two differences from 0.049 m within their
-respective sets.
+Mäkinen fitted the adjusted gravity values at each level after estimating
+instrument drift. The transcription supplies differences between those
+levels. To reproduce the polynomial fit from the published differences:
+
+1. Keep all five measurement sets. Use the ``set`` column as the set ID
+   and select the ties starting at the lowest height in each set.
+2. For sets 4 and 5, use the two ties from 0.049 m to 0.788 m and 1.311 m.
+   All three levels in each of these sets were adjusted together. The
+   0.788 to 1.311 m difference follows from the two ties sharing the
+   reference height:
+
+   .. math::
+
+      \Delta g(0.788, 1.311)
+      = \Delta g(0.049, 1.311) - \Delta g(0.049, 0.788).
+
+   This gives −214.1 µGal for set 4 and −212.5 µGal for set 5. Those
+   two rows remain in the source table.
+3. Supply the resulting seven ties to the fitter. It sets the floating
+   gravity at each reference level to zero and adds the tie differences
+   to reconstruct the target values. The fit uses 12 floating level values
+   and estimates one offset per set. The choice of zero does not affect the
+   polynomial coefficients or predicted gravity differences.
+
+This selection relies on how the Aboa ties were obtained. A separately
+measured and reduced tie can carry additional information, even when it
+shares the same endpoints as a difference derived from other ties.
 
 .. code-block:: python
 
@@ -185,7 +220,7 @@ respective sets.
    delta_g = ties.gravity_difference_ugal.to_numpy() * u.uGal
 
    fitter = FloatingGravityFit(degree=2)
-   results = fitter.fit(h1, h2, delta_g, set_ids=ties["set"])
+   results = fitter.fit(h1, h2, delta_g, set_id=ties["set"])
    model = results.fitted_model
    gravity_changes, gravity_uncertainty = model.gravity([0.5, 1.0] * u.m)
    difference, uncertainty = model.gravity_difference(1.200 * u.m, 0.050 * u.m)
@@ -211,13 +246,33 @@ The CLI reads the tie CSV and passes its heights and differences to
 ``FloatingGravityFit.fit()``. Reuse the fitter to apply the same degree to
 several datasets.
 
+After inspecting a fit, pass ``exclude_sets`` to refit using the same input
+arrays. The fitter omits every tie in each selected set and records the IDs
+in ``results.excluded_set_ids``. Pass the same IDs to
+``leave_one_set_out()`` to run that diagnostic on the retained data.
+
+.. code-block:: python
+
+   reviewed = fitter.fit(h1, h2, delta_g, set_id=ties["set"], exclude_sets=[4])
+
+Use ``auto_exclude=True`` to apply the inspection rules automatically.
+The fitter screens once after applying manual exclusions, removes every set
+with a flagged observation, and refits once. The final fit may still flag
+observations for review. If the remaining data cannot support the fit,
+the fitter reports an error. The result records automatic removals in
+``results.auto_excluded_set_ids``.
+
 The fitted polynomial, regression diagnostics, and ``prediction_table(h1, h2)``
 are available on ``PolynomialVerticalGravityFitResults``. The Mäkinen fit
 returns ``FloatingGravityFitResults``, which also provides the prepared floating
 observations and the ``plot()`` method.
 
+``results.fitted_height_range`` gives the minimum and maximum heights used
+in the floating gravity fit, in metres. Its ``prediction_table(h1, h2)``
+flags extrapolation when either endpoint falls outside that range.
+
 ``results.observations`` contains heights in metres, gravity in microgals, set
-identifiers in ``set_ids``, and geodetic residuals (fitted minus observed).
+identifiers in ``set_id``, and geodetic residuals (fitted minus observed).
 ``results.parameter_covariance`` contains covariance of all fitted parameters,
 including offsets named ``offset[run=1]``. Each offset is the fitted intercept
 for that set at height zero. The report uses shorter labels such as
@@ -270,7 +325,7 @@ each set using a fit to the remaining sets.
 
 .. code-block:: python
 
-   _, held_out = fitter.leave_one_set_out(h1, h2, delta_g, set_ids=ties["set"])
+   _, held_out = fitter.leave_one_set_out(h1, h2, delta_g, set_id=ties["set"])
 
 ``held_out`` gives predicted-minus-observed differences for ties excluded
 from each refit in microgals. To assess a specific transfer, supply
@@ -341,69 +396,111 @@ the potential difference by :math:`-c(h_2-h_1)`.
 To evaluate gravity relative to a chosen height, use
 ``gravity_difference(h0, heights)``.
 
-To run the command, write the selected ties with the CLI column names
-and convert the heights from metres to millimetres.
+To run the command, write the selected ties with the source headers and
+values. Pass a column mapping and the source height unit to ``vgfit``.
 
 .. code-block:: python
 
    from pathlib import Path
 
-   data = pd.DataFrame(
-       {
-           "runn": ties["set"],
-           "level_1": h1.to_value(u.mm),
-           "level_2": h2.to_value(u.mm),
-           "delta_g": ties.gravity_difference_ugal,
-           "std": ties.gravity_standard_error_ugal,
-       }
-   )
    output = Path("output")
    output.mkdir(exist_ok=True)
-   data.to_csv(output / "makinen2010_ties.csv", index=False)
+   ties.to_csv(output / "makinen2010_ties.csv", index=False)
 
 .. code-block:: console
 
-   vgfit -i output/makinen2010_ties.csv -n Makinen2010 -d 2 -o output
+   vgfit output/makinen2010_ties.csv -n Makinen2010 -d 2 -o output \
+     --columns set_id=set h1=lower_height_m h2=upper_height_m delta_g=gravity_difference_ugal \
+     --height-unit m --gravity-unit uGal
 
-This writes ``output/Makinen2010_all.png`` and
-``output/vg_Makinen2010_fit_all.txt``.
+This writes ``output/makinen2010_ties_vgg_fit.png`` and
+``output/makinen2010_ties_vgg_fit.txt``. The report's data section prints the
+seven rows supplied in ``makinen2010_ties.csv``. The nine-row Table 1
+transcription remains available as the source.
 
-The command supports these presentation options.
+.. rubric:: Input and output
 
-.. list-table::
-   :header-rows: 1
+* ``FILE`` gives the tie CSV. Existing scripts can supply it via ``-i FILE``
+  or ``--input FILE``. Use one form and pass ``-`` for standard input.
+* ``--columns FIELD=COLUMN ...`` maps ``set_id``, ``h1``, ``h2``, and
+  ``delta_g`` to source headers. Unspecified fields use the default lookup.
+* ``--height-unit UNIT`` sets the input unit for both heights. Defaults to
+  ``mm``.
+* ``--gravity-unit UNIT`` sets the input unit for gravity differences.
+  Defaults to ``uGal``. For example, use ``mGal`` for milligals.
+* ``-n STATION`` or ``--name STATION`` labels the station in the plot and
+  report. For standard input it also prefixes the output filenames.
+* ``-o DIR`` or ``--output-dir DIR`` writes to an existing directory.
+  Defaults to the current directory.
+* ``--overwrite`` allows the command to replace existing outputs. By default,
+  the command checks the requested output paths and stops if any already exist.
 
-   * - Option
-     - Meaning and default
-   * - ``--h-ref METRES``
-     - Uncertainty reference height; 0.710 m
-   * - ``--subtract-gradient GRADIENT``
-     - Gradient to subtract in microgals/m; automatic secant by default
-   * - ``--highlight-set ID``
-     - Highlight one measurement set by its ``runn`` value and mute the others
-   * - ``--leave-one-set-out``
-     - Report held-out tie errors by measurement set
-   * - ``--review-note TEXT``
-     - Optional reviewer comments when the report flags an issue
-   * - ``--xlim MIN MAX``
-     - Detrended gravity limits in microgals. Defaults to -10 to 10.
-   * - ``--ylim MIN MAX``
-     - Height limits in metres; 0 to 1.4
-   * - ``--auto-limits``
-     - Use automatic limits for both axes, overriding ``--xlim`` and ``--ylim``
-   * - ``--height-range MIN MAX``
-     - Curve sampling range in metres; 0.0001 to 1.4
-   * - ``-o DIR``, ``--output-dir DIR``
-     - Existing output directory; current directory by default
+Output names are based on the input filename. For example,
+``vgfit aboa_2004.csv -n Aboa`` writes ``aboa_2004_vgg_fit.png`` and
+``aboa_2004_vgg_fit.txt``. With unnamed standard input, the filenames
+are ``vgg_fit.png`` and ``vgg_fit.txt``.
+
+The command prints the paths to the files it saves. Invalid input
+values are identified by source column and data row, counting from 1
+after the CSV header. If a set has multiple reference heights, the error
+identifies the set and lists those heights in metres.
+
+.. rubric:: Fitting
+
+* ``-d DEGREE`` or ``--degree DEGREE`` sets the polynomial degree. Defaults to 2.
+* ``--exclude-set ID`` omits all ties with the given set ID.
+  Repeat for multiple sets.
+* ``--auto-exclude`` refits once after excluding sets with observations marked
+  for inspection.
+
+.. rubric:: Diagnostics and reporting
+
+* ``--leave-one-set-out`` reports held-out tie errors by measurement set.
+* ``--review-note TEXT`` records reviewer comments in the report.
+
+.. rubric:: Plotting
+
+* ``--no-plot`` writes only the report and leaves any existing plot intact.
+* ``--highlight-set ID`` highlights one measurement set in the plot and mutes
+  the others.
+* ``--h-ref METRES`` sets the reference height for the plot's uncertainty
+  band. Defaults to 0.710 m.
+* ``--subtract-gradient GRADIENT`` sets the gradient subtracted in the plot
+  in microgals/m. Defaults to the automatic secant.
+* ``--auto-limits`` uses automatic plot axis limits and draws the curve and band
+  over the fitted height range. Overrides ``--xlim`` and ``--ylim``.
+* ``--xlim MIN MAX`` sets plot limits for detrended gravity in microgals. Defaults to
+  -10 to 10.
+* ``--ylim MIN MAX`` sets height limits for the plot axis, fitted curve, and
+  uncertainty band in metres. Defaults to 0 to 1.4.
 
 To use automatic limits and a different uncertainty reference height, run
 the command with these options.
 
 .. code-block:: console
 
-   vgfit -i output/makinen2010_ties.csv -n Makinen2010 -o output --auto-limits --h-ref 0.8
+   vgfit output/makinen2010_ties.csv -n Makinen2010 -o output \
+     --columns set_id=set h1=lower_height_m h2=upper_height_m delta_g=gravity_difference_ugal \
+     --height-unit m --auto-limits --h-ref 0.8
 
-Use ``-i -`` to read CSV from standard input. The plot defaults to subtracting
+After reviewing the initial report, rerun with the IDs you decide to exclude.
+Use a separate output directory to keep both reports for comparison.
+
+.. code-block:: console
+
+   mkdir -p reviewed
+   vgfit output/makinen2010_ties.csv -n Makinen2010 -o reviewed \
+     --columns set_id=set h1=lower_height_m h2=upper_height_m delta_g=gravity_difference_ugal \
+     --height-unit m --exclude-set 4
+
+The command leaves the input CSV intact. The new report lists the excluded
+sets and retains the original input ties in its data section.
+``--leave-one-set-out`` uses only the retained sets when exclusions are supplied.
+Use ``--auto-exclude`` to apply the inspection rules in one pass. The report
+identifies automatic exclusions separately, and leave-one-set-out refits use
+the final retained sets.
+
+Use ``vgfit -`` to read CSV from standard input. The plot defaults to subtracting
 the secant gradient between the lowest observed height and 1 m. Supply
 ``--subtract-gradient`` to use a different gradient.
 If the lowest observation is exactly 1 m, automatic detrending uses the local
@@ -417,24 +514,36 @@ and the command's report writer.
    from gmeterpy.cli.vgfit.report import write_report
 
    figure = results.plot(station="Makinen2010")
-   write_report(results, "report.txt", station="Makinen2010", data=data)
+   write_report(
+       results, "report.txt", station="Makinen2010", data=ties,
+       columns={
+           "set_id": "set", "h1": "lower_height_m", "h2": "upper_height_m",
+           "delta_g": "gravity_difference_ugal",
+       },
+       height_unit=u.m,
+   )
 
 Callers own figures returned by ``plot``; the command closes its own figure.
-The report starts with the fit summary and its generation timestamp in UTC.
+The report starts with the fit summary, its generation timestamp in UTC, and
+the input filename or ``stdin`` when run from the command line.
 When diagnostics flag observations or held-out predictions are missing,
 the **Inspection** section follows the fit summary and identifies what to
-check. Its review note shows ``Pending`` until you supply
-``--review-note TEXT`` or pass ``review_note="..."`` to ``write_report()``.
+check. Supply a note with ``--review-note TEXT`` or pass
+``review_note="..."`` to ``write_report()``. If sets were excluded, the note
+appears alongside the excluded IDs in the fit summary. It also appears in
+the fit summary if there are no inspection flags. Otherwise the note appears
+in **Inspection**, which shows ``Pending`` when no note is supplied.
 The transfer model gives the polynomial, gravity difference, and uncertainty
 formulas, base units, and the full-precision coefficient vector and covariance
 matrix. The full fit then lists
 the polynomial coefficients and set offsets with their units, standard
 uncertainties, and full regression covariance. Its entries use products of
 parameter units.
-The report labels input tie heights in millimetres and prepared observation
-heights in metres. Pass the original CLI-format tie table as ``data`` to
-include it, or omit ``data`` to show the prepared observations.
-The prediction table flags pairs outside the observed height range and shows
+The data section shows the input column mapping and units and prints the
+original tie table in source row order, including any excluded ties. Pass
+the source table as ``data`` when writing a report from Python. With no input table supplied,
+the report shows the prepared observations with heights in metres.
+The prediction table flags pairs outside the fitted height range and shows
 nonzero standard uncertainties with two significant digits.
 
 Pass the second table from ``fitter.leave_one_set_out()`` to
@@ -456,7 +565,7 @@ You can set the gradient, limits, and other presentation options by keyword.
    )
 
 ``subtract_gradient`` shifts the displayed curve and observations.
-``height_range`` defaults to the observed height range and controls where
+``height_range`` defaults to the fitted height range and controls where
 the curve is drawn independently of the axis limits. Dashed curve segments
 mark extrapolation beyond the observed heights. The shaded band shows one
 standard uncertainty in the gravity difference from ``h_ref`` to each

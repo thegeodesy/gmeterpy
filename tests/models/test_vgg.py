@@ -91,7 +91,7 @@ def test_model_fit(tmp_path, monkeypatch):
         [0, 0, 0] * u.m,
         np.asarray(data.height.iloc[1:]) * u.m,
         np.asarray(data.gravity.iloc[1:]) * u.uGal,
-        set_ids=data.runn.iloc[1:],
+        set_id=data.runn.iloc[1:],
     )
 
     model = result.fitted_model
@@ -109,7 +109,7 @@ def test_observation_arrays_are_paired_by_position():
         h1=[0, 0, 0] * u.m,
         h2=[0.5, 1, 1.5] * u.m,
         delta_g=[-147, -288, -423] * u.uGal,
-        set_ids=pd.Series([1, 1, 1], index=[40, 10, 20]),
+        set_id=pd.Series([1, 1, 1], index=[40, 10, 20]),
     )
     model = result.fitted_model
     np.testing.assert_allclose(model.coefficients, [0, -300, 12], atol=1e-10)
@@ -120,13 +120,13 @@ def test_changing_set_reference_does_not_affect_model():
     gravity = np.array([0, -147.1, -287.8, -423.2]) * u.uGal
     fitter = FloatingGravityFit()
     first = fitter.fit(
-        [0, 0, 0] * u.m, heights[1:], gravity[1:], set_ids=[1, 1, 1]
+        [0, 0, 0] * u.m, heights[1:], gravity[1:], set_id=[1, 1, 1]
     ).fitted_model
     last = fitter.fit(
         [1.5, 1.5, 1.5] * u.m,
         heights[:-1],
         gravity[:-1] - gravity[-1],
-        set_ids=[1, 1, 1],
+        set_id=[1, 1, 1],
     ).fitted_model
     np.testing.assert_allclose(first.coefficients, last.coefficients)
     np.testing.assert_allclose(first.covariance, last.covariance)
@@ -137,7 +137,7 @@ def test_fit_and_evaluate_convert_units():
         [0, 0, 0] * u.cm,
         [50, 100, 150] * u.cm,
         [-0.147, -0.288, -0.423] * u.mGal,
-        set_ids=[1, 1, 1],
+        set_id=[1, 1, 1],
     )
     model = result.fitted_model
     change = model.gravity_difference(50 * u.cm, 1.5 * u.m)[0]

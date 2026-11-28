@@ -1,11 +1,12 @@
 """Floating gravity polynomial adjustment following Jaakko Mäkinen (2010)."""
 
 import itertools
+from collections.abc import Hashable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
 import pandas as pd
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 
 import gmeterpy.units as u
 from gmeterpy.numerics import polynomial
@@ -23,6 +24,22 @@ _UNIT_LEVERAGE = 1.0 - 1e-12
 
 class _InsufficientFitData(ValueError):
     """The observations cannot support the requested fit."""
+
+
+def _included_ties(
+    set_id: NDArray[Any], exclude_sets: ArrayLike | Sequence[Hashable]
+) -> NDArray[np.bool_]:
+    """Select ties from all sets except the requested exclusions."""
+    excluded = pd.Index(np.atleast_1d(np.asarray(exclude_sets, dtype=object)))
+    if excluded.empty:
+        return np.ones(set_id.shape, dtype=bool)
+    unknown = excluded[~excluded.isin(set_id)].unique()
+    if len(unknown):
+        raise ValueError(f"Unknown measurement sets: {', '.join(map(str, unknown))}")
+    included = ~pd.Index(set_id).isin(excluded)
+    if not included.any():
+        raise _InsufficientFitData("No measurement sets remain after exclusions")
+    return included
 
 
 class FloatingGravityFit:
@@ -58,7 +75,9 @@ class FloatingGravityFit:
         h2: u.Quantity,
         delta_g: u.Quantity,
         *,
-        set_ids: ArrayLike,
+        set_id: ArrayLike,
+        exclude_sets: ArrayLike | Sequence[Hashable] = (),
+        auto_exclude: bool = False,
         **kwargs: Any,
     ):
         r"""Fit a vertical gravity gradient from measured gravity differences.
@@ -67,12 +86,22 @@ class FloatingGravityFit:
         ----------
         h1, h2 : ~astropy.units.Quantity
             Reference and target heights for each tie, in compatible length
-            units. All ties in a set must share the same reference height.
+            units. Supply ties from one reference height per set.
         delta_g : ~astropy.units.Quantity
             Measured differences :math:`\Delta g_{ij}=g(h_j)-g(h_i)`, where
             :math:`h_i` is the reference and :math:`h_j` is the target.
-        set_ids : array_like
-            Set identifier for each tie. Arrays are paired by position.
+        set_id : array_like
+            One identifier per tie. Use the same identifier for ties
+            derived from the same set of adjusted gravity levels. Each
+            identifier gets its own fitted offset. Arrays are paired by
+            position.
+        exclude_sets : scalar or array_like, optional
+            Set identifiers to omit. Each identifier must occur in
+            ``set_id``. All ties in those sets are excluded from the fit.
+        auto_exclude : bool, optional
+            After manual exclusions, screen the initial fit for influential
+            observations and refit once without any set containing a flagged
+            observation. Defaults to False.
         **kwargs
             Arguments passed to statsmodels OLS.
 
@@ -86,7 +115,8 @@ class FloatingGravityFit:
         ValueError
             If a set has multiple reference heights, the coefficients cannot
             be estimated uniquely, or the fit has no
-            residual degrees of freedom to estimate uncertainty.
+            residual degrees of freedom to estimate uncertainty. Also raised
+            if an exclusion is unknown or leaves no measurement sets.
 
         Notes
         -----
@@ -97,34 +127,100 @@ class FloatingGravityFit:
         contributes one reference row and one row per supplied target tie.
         Equal target values are retained as separate observations.
         """
+        set_id = np.asarray(set_id)
+        included = _included_ties(set_id, exclude_sets)
+        result = self._fit(
+            h1,
+            h2,
+            delta_g,
+            set_id,
+            included,
+            kwargs,
+            auto_excluded_set_ids=() if auto_exclude else None,
+        )
+        if not auto_exclude:
+            return result
+
+        influence = result.influence_table()
+        automatic = tuple(
+            pd.unique(influence.loc[influence.inspect, "set_id"]).tolist()
+        )
+        if not automatic:
+            return result
+
+        try:
+            included &= _included_ties(set_id, automatic)
+            if not included.any():
+                raise _InsufficientFitData(
+                    "No measurement sets remain after exclusions"
+                )
+            return self._fit(
+                h1,
+                h2,
+                delta_g,
+                set_id,
+                included,
+                kwargs,
+                auto_excluded_set_ids=automatic,
+            )
+        except _InsufficientFitData as error:
+            sets = ", ".join(map(str, automatic))
+            raise _InsufficientFitData(
+                f"Cannot refit after automatically excluding sets {sets}. {error}"
+            ) from error
+
+    def _fit(
+        self,
+        h1: u.Quantity,
+        h2: u.Quantity,
+        delta_g: u.Quantity,
+        set_id: NDArray[Any],
+        included: NDArray[np.bool_],
+        kwargs: dict[str, Any],
+        *,
+        auto_excluded_set_ids: tuple[Hashable, ...] | None,
+    ) -> "FloatingGravityFitResults":
+        """Fit the selected ties and retain the exclusion record."""
         from statsmodels.api import OLS
 
         degree = self.degree
-
-        set_ids = np.asarray(set_ids)
+        excluded_set_ids = tuple(pd.unique(set_id[~included]).tolist())
+        if excluded_set_ids:
+            h1 = cast(u.Quantity, h1[included])
+            h2 = cast(u.Quantity, h2[included])
+            delta_g = cast(u.Quantity, delta_g[included])
+            set_id = set_id[included]
         references = pd.DataFrame(
-            {"set_ids": set_ids, "h": np.asarray(h1.to_value(u.m), dtype=float)}
+            {"set_id": set_id, "h": np.asarray(h1.to_value(u.m), dtype=float)}
         )
-        if np.any(references.groupby("set_ids")["h"].nunique().to_numpy() > 1):
-            raise ValueError("Each set must have a common reference height")
+        reference_heights = references.h.groupby(references.set_id, sort=False)
+        counts = reference_heights.nunique()
+        inconsistent = counts.index[counts > 1]
+        if len(inconsistent):
+            identifier = inconsistent[0]
+            heights = reference_heights.get_group(identifier).dropna().unique()
+            listed = ", ".join(f"{float(height)} m" for height in heights)
+            raise ValueError(
+                f"Set {identifier} has multiple reference heights: {listed}"
+            )
 
-        references = references.drop_duplicates(subset="set_ids").assign(g=0.0)
+        references = references.drop_duplicates(subset="set_id").assign(g=0.0)
         targets = pd.DataFrame(
             {
-                "set_ids": set_ids,
+                "set_id": set_id,
                 "h": np.asarray(h2.to_value(u.m), dtype=float),
                 "g": np.asarray(delta_g.to_value(u.uGal), dtype=float),
             }
         )
         observations = (
             pd.concat([references, targets])
-            .sort_values(["set_ids", "g"], ascending=[True, False], ignore_index=True)
-            .reindex(columns=["h", "g", "set_ids"])
+            .sort_values(["set_id", "g"], ascending=[True, False], ignore_index=True)
+            .reindex(columns=["h", "g", "set_id"])
         )
 
         # design matrix
         height_powers = polynomial.polyvander(observations.h.to_numpy(), degree)[:, 1:]
-        offsets = pd.get_dummies(observations.set_ids)
+        offsets = pd.get_dummies(observations.set_id)
         names = [f"offset[run={run}]" for run in offsets.columns]
         names.extend(f"a{k}" for k in range(1, degree + 1))
         exog = pd.DataFrame(
@@ -153,7 +249,12 @@ class FloatingGravityFit:
             units=(u.uGal, u.m),
         )
         return FloatingGravityFitResults(
-            observations, regression, fitted_model, method_name=self.method_name
+            observations,
+            regression,
+            fitted_model,
+            method_name=self.method_name,
+            excluded_set_ids=excluded_set_ids,
+            auto_excluded_set_ids=auto_excluded_set_ids,
         )
 
     @u.quantity_input(h1=u.m, h2=u.m, delta_g=u.uGal, transfer_h1=u.m, transfer_h2=u.m)
@@ -163,7 +264,9 @@ class FloatingGravityFit:
         h2: u.Quantity,
         delta_g: u.Quantity,
         *,
-        set_ids: ArrayLike,
+        set_id: ArrayLike,
+        exclude_sets: ArrayLike | Sequence[Hashable] = (),
+        auto_exclude: bool = False,
         transfer_h1: u.Quantity | None = None,
         transfer_h2: u.Quantity | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -174,8 +277,15 @@ class FloatingGravityFit:
         h1, h2, delta_g : ~astropy.units.Quantity
             Tie reference heights, target heights, and measured gravity
             differences (target minus reference), as in ``fit()``.
-        set_ids : array_like
-            One set identifier per tie, with no missing identifiers.
+        set_id : array_like
+            Adjusted-level set identifiers as in ``fit()``. Supply one per
+            tie with no missing identifiers.
+        exclude_sets : scalar or array_like, optional
+            Set identifiers to omit from the baseline, refits, and held-out
+            ties. Each identifier must occur in ``set_id``.
+        auto_exclude : bool, optional
+            Screen the baseline once as in ``fit()``. Use the resulting
+            exclusions throughout the diagnostic.
         transfer_h1, transfer_h2 : ~astropy.units.Quantity, optional
             Initial and final heights for optional transfer comparisons.
             When supplied, arrays must broadcast and heights in each pair
@@ -187,16 +297,15 @@ class FloatingGravityFit:
             One row per omitted set and transfer pair. Includes the full-fit
             gravity difference and its standard uncertainty, the refitted
             difference, and ``transfer_shift`` (refit minus full fit).
-            ``is_largest_shift`` marks the largest absolute shift for each
-            interval, including ties. ``full_fit_extrapolated`` and
+            ``full_fit_extrapolated`` and
             ``refit_extrapolated`` flag either endpoint outside the
-            respective fit's observed height range.
+            respective fitted height range.
             ``fit_error`` gives the reason when an omission leaves too little
             data to fit. The refitted difference, shift, and extrapolation
             flag are missing in that case. The table is empty when no
             transfer heights are supplied.
         held_out_ties : pandas.DataFrame
-            One row per original tie, in input order. Includes its observed
+            One row per retained tie, in input order. Includes its observed
             difference, the prediction from the fit that omitted its set,
             and ``prediction_error`` (predicted minus observed). Predictions
             and errors are NaN when the refit is unavailable.
@@ -204,7 +313,7 @@ class FloatingGravityFit:
         Raises
         ------
         ValueError
-            If just one transfer height is supplied.
+            If just one transfer height is supplied or exclusions are invalid.
 
         Notes
         -----
@@ -214,14 +323,28 @@ class FloatingGravityFit:
         """
         if (transfer_h1 is None) != (transfer_h2 is None):
             raise ValueError("Supply both transfer heights or omit both")
-        set_ids = np.asarray(set_ids)
-        if pd.isna(set_ids).any():
+        set_id = np.asarray(set_id)
+        included = _included_ties(set_id, exclude_sets)
+        if pd.isna(set_id[included]).any():
             raise ValueError("Every tie must have a set identifier")
-
-        full_fit = self.fit(h1, h2, delta_g, set_ids=set_ids)
+        full_fit = self.fit(
+            h1,
+            h2,
+            delta_g,
+            set_id=set_id,
+            exclude_sets=exclude_sets,
+            auto_exclude=auto_exclude,
+        )
+        if full_fit.auto_excluded_set_ids:
+            included &= _included_ties(set_id, full_fit.auto_excluded_set_ids)
+        if not included.all():
+            h1 = cast(u.Quantity, h1[included])
+            h2 = cast(u.Quantity, h2[included])
+            delta_g = cast(u.Quantity, delta_g[included])
+            set_id = set_id[included]
         held_out_ties = pd.DataFrame(
             {
-                "set_ids": set_ids,
+                "set_id": set_id,
                 "h1": h1.to_value(u.m),
                 "h2": h2.to_value(u.m),
                 "observed_delta_g": delta_g.to_value(u.uGal),
@@ -230,8 +353,8 @@ class FloatingGravityFit:
         )
         refits = {}
         fit_errors = {}
-        for set_id in pd.unique(set_ids):
-            omitted = set_ids == set_id
+        for omitted_set_id in pd.unique(set_id):
+            omitted = set_id == omitted_set_id
             try:
                 if omitted.all():
                     raise _InsufficientFitData("No measurement sets remain")
@@ -239,15 +362,15 @@ class FloatingGravityFit:
                     cast(u.Quantity, h1[~omitted]),
                     cast(u.Quantity, h2[~omitted]),
                     cast(u.Quantity, delta_g[~omitted]),
-                    set_ids=set_ids[~omitted],
+                    set_id=set_id[~omitted],
                 )
             except _InsufficientFitData as error:
                 if transfer_h1 is not None:
-                    fit_errors[set_id] = str(error)
+                    fit_errors[omitted_set_id] = str(error)
                 continue
 
             if transfer_h1 is not None:
-                refits[set_id] = refit
+                refits[omitted_set_id] = refit
             predicted, _ = refit.fitted_model.gravity_difference(
                 cast(u.Quantity, h1[omitted]), cast(u.Quantity, h2[omitted])
             )
@@ -270,7 +393,6 @@ class FloatingGravityFit:
                         "transfer_shift",
                         "refit_extrapolated",
                         "fit_error",
-                        "is_largest_shift",
                     ]
                 )
             ), held_out_ties
@@ -282,53 +404,38 @@ class FloatingGravityFit:
                     "h2",
                     "gravity_difference",
                     "gravity_difference_uncertainty",
+                    "extrapolated",
                 ]
             )
             .rename(
                 columns={
                     "gravity_difference": "full_fit_delta_g",
                     "gravity_difference_uncertainty": "full_fit_uncertainty",
+                    "extrapolated": "full_fit_extrapolated",
                 }
             )
         )
-        endpoints = baseline.filter(items=["h1", "h2"])
-        lower_endpoint = endpoints.min(axis="columns")
-        upper_endpoint = endpoints.max(axis="columns")
-        observed_heights = full_fit.observations.h
-        baseline["full_fit_extrapolated"] = lower_endpoint.lt(
-            observed_heights.min()
-        ) | upper_endpoint.gt(observed_heights.max())
-
         transfers = []
-        for set_id in pd.unique(set_ids):
-            refit = refits.get(set_id)
+        for omitted_set_id in pd.unique(set_id):
+            refit = refits.get(omitted_set_id)
             refit_delta_g = np.full(len(baseline), np.nan)
             refit_extrapolated = None
             if refit is not None:
-                predicted, _ = refit.fitted_model.gravity_difference(
-                    transfer_h1, transfer_h2
-                )
-                refit_delta_g = np.ravel(predicted.to_value(u.uGal))
-                observed_heights = refit.observations.h
-                refit_extrapolated = lower_endpoint.lt(
-                    observed_heights.min()
-                ) | upper_endpoint.gt(observed_heights.max())
+                predictions = refit.prediction_table(transfer_h1, transfer_h2)
+                refit_delta_g = predictions.gravity_difference.to_numpy()
+                refit_extrapolated = predictions.extrapolated.to_numpy()
 
             transfers.append(
                 baseline.assign(
-                    omitted_set_id=set_id,
+                    omitted_set_id=omitted_set_id,
                     refit_delta_g=refit_delta_g,
                     transfer_shift=refit_delta_g - baseline.full_fit_delta_g,
                     refit_extrapolated=refit_extrapolated,
-                    fit_error=fit_errors.get(set_id),
+                    fit_error=fit_errors.get(omitted_set_id),
                 )
             )
 
-        comparison = pd.concat(transfers, ignore_index=True)
-        shifts = comparison.transfer_shift.abs()
-        largest = shifts.groupby([comparison.h1, comparison.h2]).transform("max")
-        comparison["is_largest_shift"] = shifts.eq(largest)
-        return comparison, held_out_ties
+        return pd.concat(transfers, ignore_index=True), held_out_ties
 
 
 class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
@@ -338,13 +445,18 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
     ----------
     observations : pandas.DataFrame
         Prepared level values: ``h`` in metres, ``g`` in microgals, and
-        ``set_ids`` identifying measurement sets. Copied at construction.
+        ``set_id`` identifying measurement sets. Copied at construction.
     regression : statsmodels.regression.linear_model.RegressionResultsWrapper
         Fitted equal-weight regression, including set offsets.
     fitted_model : PolynomialVerticalGravity
         Gravity model with coefficient covariance, constructed once by fit.
     method_name : str, optional
         Display name of the fitting method.
+    excluded_set_ids : tuple, optional
+        Set identifiers excluded before fitting.
+    auto_excluded_set_ids : tuple or None, optional
+        Automatically excluded set identifiers. None means screening was
+        disabled.
 
     Notes
     -----
@@ -374,16 +486,30 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         fitted_model: PolynomialVerticalGravity,
         *,
         method_name: str = FloatingGravityFit.method_name,
+        excluded_set_ids: tuple[Hashable, ...] = (),
+        auto_excluded_set_ids: tuple[Hashable, ...] | None = None,
     ) -> None:
         """Retain the fitted model and snapshot the prepared observations."""
         super().__init__(regression, fitted_model)
         self._observations = observations.drop(columns="resid", errors="ignore").copy()
         self._method_name = method_name
+        self._excluded_set_ids = excluded_set_ids
+        self._auto_excluded_set_ids = auto_excluded_set_ids
 
     @property
     def method_name(self) -> str:
         """Display name of the method used to fit the model."""
         return self._method_name
+
+    @property
+    def excluded_set_ids(self) -> tuple[Hashable, ...]:
+        """Manually and automatically excluded set IDs, in input order."""
+        return self._excluded_set_ids
+
+    @property
+    def auto_excluded_set_ids(self) -> tuple[Hashable, ...] | None:
+        """Automatically excluded set IDs, or None when screening was disabled."""
+        return self._auto_excluded_set_ids
 
     @property
     def observations(self) -> pd.DataFrame:
@@ -393,9 +519,40 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         -------
         pandas.DataFrame
             Independent table with ``h`` in metres, ``g`` and ``resid`` in
-            microgals, and set identifiers ``set_ids``.
+            microgals, and set identifiers ``set_id``.
         """
         return self._observations.assign(resid=self.residuals)
+
+    @property
+    def fitted_height_range(self) -> tuple[float, float]:
+        """Minimum and maximum heights included in the fit, in metres."""
+        observations = self.observations
+        heights = observations.loc[observations.resid.notna(), "h"]
+        return float(heights.min()), float(heights.max())
+
+    def prediction_table(self, h1: u.Quantity, h2: u.Quantity) -> pd.DataFrame:
+        """Return transfer predictions and flag extrapolation.
+
+        Parameters
+        ----------
+        h1, h2 : ~astropy.units.Quantity
+            Distinct initial and final heights. Arrays must broadcast.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Gravity differences, average gradients, and their uncertainties
+            in microgals and microgals per metre, respectively. Heights are
+            in metres. ``extrapolated`` marks pairs with either height
+            outside the fitted height range.
+        """
+        predictions = super().prediction_table(h1, h2)
+        lower, upper = self.fitted_height_range
+        endpoints = predictions[["h1", "h2"]]
+        predictions["extrapolated"] = ((endpoints < lower) | (endpoints > upper)).any(
+            axis="columns"
+        )
+        return predictions
 
     def summary(self, *, alpha: float = 0.05) -> "Summary":
         """Return the statsmodels summary for the floating-gravity OLS fit.
@@ -423,6 +580,8 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
             diagnostics are dimensionless. The ``unit_leverage`` flag marks
             leverage numerically equal to one. Studentized residuals and
             Cook's distance are NaN when undefined, including at unit leverage.
+            The ``inspect`` flag marks observations that exceed an inspection
+            threshold or have unit leverage.
         """
         influence = self.regression.get_influence()
         leverage = influence.hat_matrix_diag
@@ -442,7 +601,21 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         diagnostics[columns] = values.where(
             np.isfinite(values) & (leverage[:, None] < _UNIT_LEVERAGE)
         )
-        return self.observations.join(diagnostics)
+        table = self.observations.join(diagnostics)
+        residual_limit, leverage_limit, cook_limit = self.inspection_limits
+        table["inspect"] = (
+            table.studentized_residual.abs().gt(residual_limit)
+            | table.unit_leverage.eq(True)
+            | table.leverage.gt(leverage_limit)
+            | table.cooks_distance.gt(cook_limit)
+        )
+        return table
+
+    @property
+    def inspection_limits(self) -> tuple[float, float, float]:
+        """Cutoffs for absolute studentized residual, leverage, and Cook's distance."""
+        n, p = self.number_of_observations, self.number_of_unknowns
+        return 2, 2 * p / n, 4 / n
 
     def plot(
         self,
@@ -502,13 +675,13 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         import matplotlib.pyplot as plt
 
         observations = self.observations
-        sets = observations.groupby("set_ids")
+        sets = observations.groupby("set_id")
         highlighted_id = None if highlight_set is None else str(highlight_set)
         if highlighted_id is not None and highlighted_id not in map(str, sets.groups):
             raise ValueError(f"Unknown measurement set {highlighted_id!r}")
 
         model = self.fitted_model
-        observed_min, observed_max = observations.h.min(), observations.h.max()
+        observed_min, observed_max = self.fitted_height_range
         height_min, height_max = (
             (observed_min, observed_max)
             if height_range is None

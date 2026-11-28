@@ -26,7 +26,7 @@ def _fit_ties(data, degree=2):
         data.level_1.to_numpy(dtype=float) / 1000 * u.m,
         data.level_2.to_numpy(dtype=float) / 1000 * u.m,
         data.delta_g.to_numpy(dtype=float) * u.uGal,
-        set_ids=data.runn,
+        set_id=data.runn,
     )
 
 
@@ -150,7 +150,7 @@ def test_influence_table_handles_unit_leverage(tmp_path):
         [0, 0, 0, 0] * u.m,
         [0.5, 0.5, 0.5, 1.0] * u.m,
         [-147, -146, -148, -288] * u.uGal,
-        set_ids=[1, 1, 1, 1],
+        set_id=[1, 1, 1, 1],
     )
 
     table = result.influence_table()
@@ -222,7 +222,7 @@ def test_jaakko_makinen_2010_polynomial_fit_ties():
         ties.lower_height_m.to_numpy() * u.m,
         ties.upper_height_m.to_numpy() * u.m,
         ties.gravity_difference_ugal.to_numpy() * u.uGal,
-        set_ids=ties["set"],
+        set_id=ties["set"],
     )
 
     # Section 5 / Fig. 2a: published coefficients and one-sigma errors.
@@ -333,6 +333,29 @@ def test_report_starts_with_fit_summary(quadratic_fit, tmp_path):
     assert report.index("Fit summary:") < report.index("Transfer model:")
 
 
+def test_report_keeps_review_note_after_a_clean_refit(tmp_path):
+    results = FloatingGravityFit(degree=1).fit(
+        [0] * 5 * u.m,
+        [1] * 5 * u.m,
+        [-301, -299, -301, -299, -330] * u.uGal,
+        set_id=[1, 2, 3, 4, 5],
+        exclude_sets=[5],
+    )
+    path = tmp_path / "report.txt"
+
+    write_report(
+        results, path, review_note="Excluded set 5 after checking field records."
+    )
+
+    report = path.read_text()
+    assert "Inspection:" not in report
+    summary = report.split("Fit summary:", 1)[1].split("\n\n", 1)[0]
+    assert (
+        "Excluded sets 5 Review note Excluded set 5 after checking field records."
+        in (" ".join(summary.split()))
+    )
+
+
 def test_report_lists_full_fit_and_recreates_transfer_model(quadratic_fit, tmp_path):
     path = tmp_path / "report.txt"
     write_report(quadratic_fit, path)
@@ -440,7 +463,7 @@ def test_plot_presentation_options(quadratic_fit):
         ]
         np.testing.assert_allclose(extrapolated_heights[[0, -1]], [1.5, 1.8])
         for line, (_, group) in zip(
-            ax.lines[:2], observations.groupby("set_ids"), strict=True
+            ax.lines[:2], observations.groupby("set_id"), strict=True
         ):
             group = group.sort_values("h", kind="stable")
             np.testing.assert_allclose(
@@ -483,7 +506,7 @@ def test_plot_connects_observations_in_height_order():
         [0, 0, 0] * u.m,
         [0.500, 0.501, 1.0] * u.m,
         [-149, -148, -290] * u.uGal,
-        set_ids=[1, 1, 1],
+        set_id=[1, 1, 1],
     )
 
     figure = result.plot()
@@ -500,7 +523,7 @@ def test_plot_reconstructs_noisy_observations():
     figure = result.plot(subtract_gradient=-300)
     try:
         ax = figure.axes[0]
-        groups = list(result.observations.groupby("set_ids"))
+        groups = list(result.observations.groupby("set_id"))
         for line, (run_id, group) in zip(ax.lines[: len(groups)], groups, strict=True):
             group = group.sort_values("h", kind="stable")
             offset = result.params[f"offset[run={run_id}]"]
@@ -543,3 +566,18 @@ def test_prediction_table_from_shared_results(quadratic_fit):
     np.testing.assert_allclose(table.h2, [0.5, 1.5])
     np.testing.assert_allclose(table.gravity_difference, [141, -135])
     np.testing.assert_allclose(table.mean_gradient, [-282, -270])
+
+
+def test_prediction_table_flags_heights_outside_the_fit():
+    results = FloatingGravityFit(degree=1).fit(
+        [0, 0, 0] * u.m,
+        [0.5, 1, 2] * u.m,
+        [-150, -300, np.nan] * u.uGal,
+        set_id=[1, 1, 1],
+        missing="drop",
+    )
+
+    table = results.prediction_table([1, 2, 1, 1] * u.m, [0, 0, 2, -0.1] * u.m)
+
+    assert results.fitted_height_range == (0, 1)
+    assert table.extrapolated.tolist() == [False, True, True, True]
