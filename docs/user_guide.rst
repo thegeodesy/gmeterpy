@@ -255,13 +255,6 @@ in ``results.excluded_set_ids``. Pass the same IDs to
 
    reviewed = fitter.fit(h1, h2, delta_g, set_id=ties["set"], exclude_sets=[4])
 
-Use ``auto_exclude=True`` to apply the inspection rules automatically.
-The fitter screens once after applying manual exclusions, removes every set
-with a flagged observation, and refits once. The final fit may still flag
-observations for review. If the remaining data cannot support the fit,
-the fitter reports an error. The result records automatic removals in
-``results.auto_excluded_set_ids``.
-
 The fitted polynomial, regression diagnostics, and ``prediction_table(h1, h2)``
 are available on ``PolynomialVerticalGravityFitResults``. The Mäkinen fit
 returns ``FloatingGravityFitResults``, which also provides the prepared floating
@@ -312,26 +305,29 @@ Pass ``alpha=0.10`` for 90% intervals.
 Use ``results.influence_table()`` to see leverage, internally studentized
 residuals, and Cook's distance alongside the floating observations.
 Studentized residuals retain the fitted-minus-observed sign.
-The report marks each observation that meets a screening criterion with
-an asterisk in the ``Inspect`` column. The criteria use
+The ``inspect`` column marks observations meeting the influence criteria.
+The criteria use
 ``|studentized residual| > 2``, leverage greater than ``2p/n``, and
 Cook's distance greater than ``4/n``, where ``p`` includes set offsets and
 ``n`` is the number of fitted observations. Unit leverage is flagged
 separately because the studentized residual and Cook's distance are undefined
 there. These rules identify observations for inspection.
 
-To check agreement among measurement sets, predict the original ties in
-each set using a fit to the remaining sets.
+To check agreement among entire measurement sets, predict the original
+ties in each set using a fit to the remaining sets.
 
 .. code-block:: python
 
    _, held_out = fitter.leave_one_set_out(h1, h2, delta_g, set_id=ties["set"])
 
 ``held_out`` gives predicted-minus-observed differences for ties excluded
-from each refit in microgals. To assess a specific transfer, supply
+from each refit in microgals, the fitted height range after omission, and
+raw and Holm-adjusted p-values in ``set_p_value`` and ``set_p_value_adjusted``.
+Each tie in the same set carries
+the same test result. To assess a specific transfer, supply
 ``transfer_h1`` and ``transfer_h2``. The first returned table then gives
-each refit's shift from the full-fit transfer, flags extrapolation, and
-records any refit failures in ``fit_error``.
+each refit's transfer, standard uncertainty, and shift from the full fit.
+It marks extrapolation and records fit failures in ``fit_error``.
 
 Models can also be created directly from published coefficients:
 
@@ -450,13 +446,18 @@ identifies the set and lists those heights in metres.
 * ``-d DEGREE`` or ``--degree DEGREE`` sets the polynomial degree. Defaults to 2.
 * ``--exclude-set ID`` omits all ties with the given set ID.
   Repeat for multiple sets.
-* ``--auto-exclude`` refits once after excluding sets with observations marked
-  for inspection.
 
 .. rubric:: Diagnostics and reporting
 
-* ``--leave-one-set-out`` reports held-out tie errors by measurement set.
-* ``--review-note TEXT`` records reviewer comments in the report.
+* ``--leave-one-set-out`` refits without each retained set in turn and reports
+  its worst held-out tie error and the number of held-out ties over tolerance.
+* ``--tie-tolerance UGAL`` runs leave-one-set-out and overrides its 3 microgal
+  tolerance for individual held-out errors.
+* ``--loso-transfer H1 H2`` runs the same refits and adds gravity transfer
+  shifts for the specified pair of heights in metres.
+* ``--exclude-reason ID TEXT`` records a reason alongside a manual exclusion.
+  Supply ``--exclude-set ID`` for the same set. Repeat for multiple sets.
+* ``--review-note TEXT`` records reviewer comments in the Review section.
 
 .. rubric:: Plotting
 
@@ -491,14 +492,11 @@ Use a separate output directory to keep both reports for comparison.
    mkdir -p reviewed
    vgfit output/makinen2010_ties.csv -n Makinen2010 -o reviewed \
      --columns set_id=set h1=lower_height_m h2=upper_height_m delta_g=gravity_difference_ugal \
-     --height-unit m --exclude-set 4
+     --height-unit m --exclude-set 4 --exclude-reason 4 "Reference height could not be verified"
 
 The command leaves the input CSV intact. The new report lists the excluded
 sets and retains the original input ties in its data section.
 ``--leave-one-set-out`` uses only the retained sets when exclusions are supplied.
-Use ``--auto-exclude`` to apply the inspection rules in one pass. The report
-identifies automatic exclusions separately, and leave-one-set-out refits use
-the final retained sets.
 
 Use ``vgfit -`` to read CSV from standard input. The plot defaults to subtracting
 the secant gradient between the lowest observed height and 1 m. Supply
@@ -524,31 +522,47 @@ and the command's report writer.
    )
 
 Callers own figures returned by ``plot``; the command closes its own figure.
-The report starts with the fit summary, its generation timestamp in UTC, and
-the input filename or ``stdin`` when run from the command line.
-When diagnostics flag observations or held-out predictions are missing,
-the **Inspection** section follows the fit summary and identifies what to
-check. Supply a note with ``--review-note TEXT`` or pass
-``review_note="..."`` to ``write_report()``. If sets were excluded, the note
-appears alongside the excluded IDs in the fit summary. It also appears in
-the fit summary if there are no inspection flags. Otherwise the note appears
-in **Inspection**, which shows ``Pending`` when no note is supplied.
-The transfer model gives the polynomial, gravity difference, and uncertainty
-formulas, base units, and the full-precision coefficient vector and covariance
-matrix. The full fit then lists
-the polynomial coefficients and set offsets with their units, standard
-uncertainties, and full regression covariance. Its entries use products of
-parameter units.
+The fit summary includes the station name, generation timestamp in UTC,
+and the count and IDs of explicitly excluded sets.
+When there are review details, the **Review** section follows the fit summary.
+**Manual exclusions** lists the sets and their reasons. Review also lists ties
+or missing predictions to check after the final fit.
+The Review section includes a review note when supplied.
+From Python, pass ``review_note="..."`` and ``exclusion_reasons={set_id: "reason"}``
+to ``write_report()``.
+The transfer model starts with the units and the formulas for the gravity
+difference and its standard uncertainty. The full-precision coefficient
+vector and covariance matrix follow, with their shared coefficient order.
+The full fit lists the polynomial coefficients, set offsets, and their
+standard uncertainties, followed by a separate full regression covariance
+table. Its rows and columns follow the order of estimated parameters and
+its entries use products of parameter units.
 The data section shows the input column mapping and units and prints the
 original tie table in source row order, including any excluded ties. Pass
-the source table as ``data`` when writing a report from Python. With no input table supplied,
-the report shows the prepared observations with heights in metres.
+the source table as ``data`` when writing a report from Python.
 The prediction table flags pairs outside the fitted height range and shows
 nonzero standard uncertainties with two significant digits.
 
-Pass the second table from ``fitter.leave_one_set_out()`` to
-``write_report()`` as ``held_out_ties=held_out``. The leave-one-set-out section shows
-the number of held-out ties and their mean and RMS prediction errors by set.
+With leave-one-set-out enabled, **Review** includes a **Leave-one-set-out
+check** that counts all checked sets. Each flagged set has its own entry
+with the original input rows, height pairs, and signed errors for its
+flagged ties. The entry shows any change to the lowest or highest fitted
+height when the set is omitted.
+The **Inspection threshold** in **Fit summary** applies to absolute errors
+before rounding. Review also identifies sets with unavailable predictions.
+Each diagnostic refit omits every tie in the selected measurement set.
+With a transfer pair, each flagged set entry gives its transfer shift and
+change in standard uncertainty. The check also lists the shifts for the
+other omissions and marks extrapolation.
+
+The Review section uses held-out errors when requested and influence rules
+otherwise. Both checks identify observations for inspection. Use
+``--exclude-set ID`` to omit a set from the fitted model. Individual
+floating-observation diagnostics are available through
+``results.influence_table()`` in Python.
+From Python, pass the second table from ``fitter.leave_one_set_out()`` as
+``held_out_ties`` and the first as ``held_out_transfers`` if it contains one
+transfer pair. Set ``tie_tolerance`` to override the default in microgals.
 
 Library plots use the same detrending rule and automatic axis limits.
 You can set the gradient, limits, and other presentation options by keyword.

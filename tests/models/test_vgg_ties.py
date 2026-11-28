@@ -120,6 +120,7 @@ def test_fit_and_refits_exclude_the_same_sets():
     assert result.fitted_height_range == (0, 1)
     assert result.params["a1"] == pytest.approx(-310)
     assert held_out.set_id.tolist() == ["A", "A", "B", "B"]
+    assert held_out.source_row.tolist() == [1, 2, 3, 4]
     assert held_out.prediction_error.tolist() == pytest.approx([-10, -20, 10, 20])
 
 
@@ -140,7 +141,21 @@ def test_report_shows_held_out_ties_without_transfer_heights(tmp_path):
     result = fitter.fit(*ties, set_id=set_id)
     write_report(result, path, held_out_ties=held_out)
     report = path.read_text(encoding="utf-8")
-    assert "Held-out tie errors (predicted minus observed)" in report
+    diagnostics = report.split("Leave-one-set-out check\n", 1)[1]
+    overview, first_set, second_set, _ = diagnostics.split("\n\n", 3)
+    assert first_set.splitlines() == [
+        "Set 1 retained (2 of 2 ties flagged)",
+        "  Row 1  0 to 0.5 m  -10.00 uGal",
+        "  Row 2  0 to 1 m  -20.00 uGal",
+        "  Lowest fitted height on omission  0 to 2 m",
+    ]
+    assert second_set.splitlines() == [
+        "Set 2 retained (2 of 2 ties flagged)",
+        "  Row 3  2 to 2.5 m  +10.00 uGal",
+        "  Row 4  2 to 3 m  +20.00 uGal",
+        "  Highest fitted height on omission  3 to 1 m",
+    ]
+    assert "predicted minus observed" in overview
 
 
 def test_leave_one_set_out_flags_refit_without_residual_degrees_of_freedom():
@@ -155,9 +170,14 @@ def test_leave_one_set_out_flags_refit_without_residual_degrees_of_freedom():
 
     assert "residual degrees of freedom" in transfers.loc[0, "fit_error"]
     assert pd.isna(transfers.loc[0, "transfer_shift"])
+    assert pd.isna(transfers.loc[0, "refit_uncertainty"])
     assert pd.isna(transfers.loc[0, "refit_extrapolated"])
     assert pd.isna(transfers.loc[1, "fit_error"])
+    assert pd.notna(transfers.loc[1, "refit_uncertainty"])
+    assert held_out.loc[held_out.set_id == 1, "refit_height_min"].isna().all()
+    assert held_out.loc[held_out.set_id == 2, "refit_height_max"].tolist() == [1.5, 1.5]
     assert held_out.loc[held_out.set_id == 1, "prediction_error"].isna().all()
+    assert held_out.loc[held_out.set_id == 1, "set_p_value_adjusted"].isna().all()
     assert held_out.loc[held_out.set_id == 2, "prediction_error"].tolist() == (
         pytest.approx([1, 1])
     )

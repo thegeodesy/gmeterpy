@@ -163,10 +163,26 @@ def test_influence_table_handles_unit_leverage(tmp_path):
     path = tmp_path / "report.txt"
     assert target.unit_leverage
     write_report(result, path)
-    assert any(
-        row.split()[-3:] == ["n/a", "n/a", "*"]
-        for row in path.read_text(encoding="utf-8").splitlines()
+    report = path.read_text(encoding="utf-8")
+    assert "Final-fit inspection" in report
+    assert "\nData:\n" not in report
+
+
+def test_influence_flags_do_not_exclude_sets():
+    data = pd.read_csv(SOCHI_TIES)
+    fitter = FloatingGravityFit()
+    ties = (
+        data.level_1.to_numpy() * u.mm,
+        data.level_2.to_numpy() * u.mm,
+        data.delta_g.to_numpy() * u.uGal,
     )
+    result = fitter.fit(*ties, set_id=data.runn)
+    diagnostic = result.influence_table()
+    assert set(diagnostic.loc[diagnostic.inspect, "set_id"]) == {1, 5}
+    assert result.excluded_set_ids == ()
+    assert result.fitted_height_range == pytest.approx((0.258, 1.293))
+    with pytest.raises(TypeError, match="auto_exclude has been removed"):
+        fitter.fit(*ties, set_id=data.runn, auto_exclude=True)
 
 
 @pytest.mark.parametrize("rename_runs", [False, True])
@@ -333,6 +349,28 @@ def test_report_starts_with_fit_summary(quadratic_fit, tmp_path):
     assert report.index("Fit summary:") < report.index("Transfer model:")
 
 
+def test_set_report_uses_strict_unrounded_inspection_threshold(quadratic_fit, tmp_path):
+    ties = pd.DataFrame(
+        {
+            "source_row": [1, 2, 3, 4],
+            "set_id": [1, 1, 2, 2],
+            "h1": [0.0] * 4,
+            "h2": [0.5, 1.0, 0.5, 1.0],
+            "prediction_error": [+3.0, -3.0, +3.001, -3.001],
+        }
+    )
+    path = tmp_path / "report.txt"
+    write_report(quadratic_fit, path, held_out_ties=ties)
+
+    diagnostics = path.read_text().split("Leave-one-set-out check\n", 1)[1]
+    _, details, _ = diagnostics.split("\n\n", 2)
+    assert details.splitlines() == [
+        "Set 2 retained (2 of 2 ties flagged)",
+        "  Row 3  0 to 0.5 m  +3.001 uGal",
+        "  Row 4  0 to 1 m  -3.001 uGal",
+    ]
+
+
 def test_report_keeps_review_note_after_a_clean_refit(tmp_path):
     results = FloatingGravityFit(degree=1).fit(
         [0] * 5 * u.m,
@@ -348,28 +386,34 @@ def test_report_keeps_review_note_after_a_clean_refit(tmp_path):
     )
 
     report = path.read_text()
-    assert "Inspection:" not in report
+    assert "Final-fit inspection" not in report
     summary = report.split("Fit summary:", 1)[1].split("\n\n", 1)[0]
-    assert (
-        "Excluded sets 5 Review note Excluded set 5 after checking field records."
-        in (" ".join(summary.split()))
-    )
+    assert "Excluded sets 1 (IDs 5)" in " ".join(summary.split())
+    assert "Review note" not in summary
+    review = report.split("Review:\n", 1)[1].split("\n\nTransfer model:\n", 1)[0]
+    assert "Review note    Excluded set 5 after checking field records." in review
+    assert "Manual exclusions\n  Set 5:" in review
 
 
 def test_report_lists_full_fit_and_recreates_transfer_model(quadratic_fit, tmp_path):
     path = tmp_path / "report.txt"
-    write_report(quadratic_fit, path)
+    write_report(quadratic_fit, path, input_source="private-source.csv")
 
     report = path.read_text(encoding="utf-8")
+    assert "private-source.csv" not in report
     transfer_section, full_fit = report.split("Transfer model:\n", 1)[1].split(
         "\n\nFull fit:\n", 1
     )
-    assert "Units (gravity, height)  uGal, m" in transfer_section
-    assert "a = [a0, a1, a2]" in transfer_section
-    assert "g(h) = [1, h, h^2] @ a" in transfer_section
+    assert "Use heights in metres." in transfer_section
+    assert "Gravity differences and uncertainties are in uGal." in transfer_section
+    assert "g(h) = a0 + a1*h + a2*h^2" in transfer_section
     assert "d = [0, h2 - h1, h2^2 - h1^2]" in transfer_section
-    assert "delta_g(h1, h2) = g(h2) - g(h1) = d @ a" in transfer_section
+    assert "delta_g = g(h2) - g(h1)" in transfer_section
     assert "u(delta_g) = sqrt(d @ C @ d.T)" in transfer_section
+    assert (
+        "a and the rows and columns of C follow the order [a0, a1, a2]."
+        in transfer_section
+    )
     vector, matrix = transfer_section.rsplit("\na = ", 1)[1].split("\nC = ", 1)
     coefficients = literal_eval(vector)
     covariance = literal_eval(matrix)
@@ -381,9 +425,8 @@ def test_report_lists_full_fit_and_recreates_transfer_model(quadratic_fit, tmp_p
         recreated.covariance, quadratic_fit.fitted_model.covariance
     )
 
-    model_section, covariance_section, _ = full_fit.split("\n\n", 2)
-    assert "Floating gravity = gravity polynomial + set offset" not in model_section
-    rows = [line.split() for line in model_section.splitlines()[2:]]
+    table, covariance_section, _ = full_fit.split("\n\n", 2)
+    rows = [line.split() for line in table.splitlines()[2:]]
     assert rows[:3] == [
         ["a0", "0", "fixed", "uGal"],
         ["a1", "-300", f"{quadratic_fit.sigma['a1']:.6g}", "uGal/m"],
@@ -399,19 +442,21 @@ def test_report_lists_full_fit_and_recreates_transfer_model(quadratic_fit, tmp_p
             "uGal",
         ]
     assert len(rows) == 5
-    assert covariance_section.startswith("Full covariance matrix\n")
-    covariance_rows = [line.split() for line in covariance_section.splitlines()[2:]]
-    labels = ["offset[1]", "offset[2]", "a1", "a2"]
-    assert covariance_rows[0] == labels
-    assert [row[0] for row in covariance_rows[1:]] == labels
+    labels = ["a1", "a2", "offset[1]", "offset[2]"]
+    assert [row[0] for row in rows[1:]] == labels
+    heading, units, header, *covariance_rows = covariance_section.splitlines()
+    assert heading == "Full covariance matrix"
+    assert units == "Entries use products of parameter units."
+    assert header.split() == ["Param.", *labels]
+    assert [row.split()[0] for row in covariance_rows] == labels
+    expected_order = ["a1", "a2", "offset[run=1]", "offset[run=2]"]
     np.testing.assert_allclose(
-        np.array([row[1:] for row in covariance_rows[1:]], dtype=float),
-        quadratic_fit.parameter_covariance.to_numpy(),
+        np.array([row.split()[1:] for row in covariance_rows], dtype=float),
+        quadratic_fit.parameter_covariance.loc[
+            expected_order, expected_order
+        ].to_numpy(),
         rtol=5e-6,
     )
-    assert "h (m)" in report
-    assert "g (uGal)" in report
-    assert "resid (uGal)" in report
 
 
 def test_plot_leaves_figure_with_caller(quadratic_fit, tmp_path):

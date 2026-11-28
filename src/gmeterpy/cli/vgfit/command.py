@@ -3,6 +3,7 @@
 import argparse
 import sys
 from contextlib import nullcontext
+from math import isfinite
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -12,7 +13,7 @@ import gmeterpy.units as u
 from gmeterpy.models.vgg.floating import FloatingGravityFit
 
 from .input import LEGACY_COLUMNS, numeric_column, resolve_columns
-from .report import write_report
+from .report import DEFAULT_TIE_TOLERANCE, write_report
 
 
 def main(argv=None):
@@ -92,17 +93,33 @@ def main(argv=None):
         metavar="ID",
         help="Exclude a measurement set from the fit; repeat for multiple sets",
     )
-    fitting.add_argument(
-        "--auto-exclude",
-        action="store_true",
-        help="Refit once after excluding sets with flagged observations",
-    )
 
     reporting = parser.add_argument_group("Diagnostics and reporting")
     reporting.add_argument(
+        "--tie-tolerance",
+        type=float,
+        metavar="UGAL",
+        help=f"Run leave-one-set-out with this tie error tolerance in microgals (default: {DEFAULT_TIE_TOLERANCE:g})",
+    )
+    reporting.add_argument(
         "--leave-one-set-out",
         action="store_true",
-        help="Report held-out tie errors by measurement set",
+        help="Refit without each retained set and flag its large held-out tie errors",
+    )
+    reporting.add_argument(
+        "--loso-transfer",
+        type=float,
+        nargs=2,
+        metavar=("H1", "H2"),
+        help="Run leave-one-set-out and report transfer shifts between H1 and H2 in metres",
+    )
+    reporting.add_argument(
+        "--exclude-reason",
+        action="append",
+        nargs=2,
+        default=[],
+        metavar=("ID", "TEXT"),
+        help="Record a reason for a manually excluded set; repeat for multiple sets",
     )
     reporting.add_argument(
         "--review-note",
@@ -157,6 +174,16 @@ def main(argv=None):
     )
 
     args = parser.parse_args(argv)
+    leave_one_set_out = (
+        args.leave_one_set_out
+        or args.loso_transfer is not None
+        or args.tie_tolerance is not None
+    )
+    tie_tolerance = (
+        DEFAULT_TIE_TOLERANCE if args.tie_tolerance is None else args.tie_tolerance
+    )
+    if not isfinite(tie_tolerance) or tie_tolerance <= 0:
+        parser.error("--tie-tolerance must be finite and greater than zero")
     if args.file is not None and args.input is not None:
         parser.error("Supply the input as FILE or with --input, not both")
     input_file = args.file if args.file is not None else args.input
@@ -189,7 +216,7 @@ def main(argv=None):
     except (OSError, ValueError) as error:
         parser.error(str(error))
 
-    held_out_ties = None
+    held_out_ties = held_out_transfers = None
     try:
         fitter = FloatingGravityFit(degree=args.degree)
         if data.empty:
@@ -228,17 +255,40 @@ def main(argv=None):
             )
         ids_by_label = {str(identifier): identifier for identifier in set_id.unique()}
         exclusions = [ids_by_label.get(label, label) for label in args.exclude_set]
+        exclusion_reasons = {}
+        for label, reason in args.exclude_reason:
+            if label not in args.exclude_set:
+                raise ValueError(
+                    f"--exclude-reason for {label!r} requires --exclude-set {label!r}"
+                )
+            identifier = ids_by_label.get(label, label)
+            if identifier in exclusion_reasons:
+                raise ValueError(f"Multiple exclusion reasons for set {label!r}")
+            if not reason.strip():
+                raise ValueError(f"Empty exclusion reason for set {label!r}")
+            exclusion_reasons[identifier] = reason.strip()
         result = fitter.fit(
             h1,
             h2,
             delta_g,
             set_id=set_id,
             exclude_sets=exclusions,
-            auto_exclude=args.auto_exclude,
         )
-        if args.leave_one_set_out:
-            _, held_out_ties = fitter.leave_one_set_out(
-                h1, h2, delta_g, set_id=set_id, exclude_sets=result.excluded_set_ids
+        transfer_h1 = transfer_h2 = None
+        if args.loso_transfer is not None:
+            start, end = args.loso_transfer
+            if not (isfinite(start) and isfinite(end)) or start == end:
+                raise ValueError("--loso-transfer requires two distinct finite heights")
+            transfer_h1, transfer_h2 = start * u.m, end * u.m
+        if leave_one_set_out:
+            held_out_transfers, held_out_ties = fitter.leave_one_set_out(
+                h1,
+                h2,
+                delta_g,
+                set_id=set_id,
+                exclude_sets=result.excluded_set_ids,
+                transfer_h1=transfer_h1,
+                transfer_h2=transfer_h2,
             )
     except ValueError as error:
         parser.error(str(error))
@@ -273,12 +323,14 @@ def main(argv=None):
             staged_report,
             station,
             data=data,
-            input_source="stdin" if input_path is None else input_file,
             columns=columns,
             height_unit=height_unit,
             gravity_unit=gravity_unit,
             held_out_ties=held_out_ties,
+            held_out_transfers=held_out_transfers,
+            tie_tolerance=tie_tolerance,
             review_note=args.review_note,
+            exclusion_reasons=exclusion_reasons,
         )
         try:
             _publish_outputs(outputs, overwrite=args.overwrite)

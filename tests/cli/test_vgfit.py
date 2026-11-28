@@ -29,13 +29,13 @@ def test_main_writes_station_outputs(
     args = [str(SOCHI_TIES), "-n", station]
     review_note = "Checked heights and retained both sets."
     if include_sensitivity:
-        args.extend(["--leave-one-set-out", "--review-note", review_note])
+        args.extend(["--loso-transfer", "0.270", "1.200", "--review-note", review_note])
     main(args)
 
     assert plt.get_fignums() == figures
     assert plt.imread(tmp_path / "sochi_vgg_fit.png").size > 0
     report = (tmp_path / "sochi_vgg_fit.txt").read_text()
-    assert f"vertical gravity gradients at {station}\n" in report
+    assert report.splitlines()[0] == "Vertical gravity fit report"
     assert "0.000 --> 1.400" in report
     assert "h1 --> h2 (m)" in report
     assert "Gravity diff. (uGal)" in report
@@ -50,37 +50,155 @@ def test_main_writes_station_outputs(
     data_section = report.split("Data:\n", 1)[1].split("\n\n", 1)[0]
     source = pd.read_csv(SOCHI_TIES)
     assert source.to_string(index=False, na_rep="", float_format=str) in data_section
-    assert "Influence diagnostics:" in report
-    summary, inspection = report.split("Inspection:\n", 1)
+    assert "Influence diagnostics:" not in report
+    summary, review = report.split("Review:\n", 1)
     assert summary.split("\n\n")[-2].startswith("Fit summary:")
-    inspection = inspection.split("\n\n", 1)[0]
-    assert (
-        "Set 1: check all ties. The shared reference height (258 mm) is flagged."
-        in inspection
-    )
-    assert "Set 5: check the 711 to 1292 mm tie." in inspection
-    assert (
-        f"Review note: {review_note if include_sensitivity else 'Pending'}"
-        in inspection
-    )
-    assert "*  Observation flagged for inspection." in report
-    assert "Lev. > 2p/n (1.176 for this fit)" in report
-    assert "Cook's D > 4/n (0.235 for this fit)" in report
-    assert (
-        "For a flagged shared reference height, check all ties in that set." in report
-    )
-    assert any(
-        row.split()[:3] == ["0.258", "0.000", "1"] and row.split()[-1] == "*"
-        for row in report.splitlines()
-    )
-    assert ("Leave-one-set-out summary:" in report) == include_sensitivity
+    assert f"Station {station or 'Unspecified'}" in " ".join(summary.split())
+    assert "Excluded sets 0" in " ".join(summary.split())
+    assert "Observed height range 0.258 to 1.293 m" in " ".join(summary.split())
+    assert "Leave-one-set-out" not in summary
+    review = review.split("\n\nTransfer model:\n", 1)[0]
+    assert "Review status" not in review
     if include_sensitivity:
-        tie_summary = report.split(
-            "Held-out tie errors (predicted minus observed)\n", 1
-        )[1].split("\n\n", 1)[0]
-        first_set = tie_summary.splitlines()[1].split()
-        assert first_set == ["1", "2", "-4.60", "4.72"]
-        assert "Largest transfer shift" not in report
+        assert f"Review note    {review_note}" in review
+        diagnostics = review.split("Leave-one-set-out check\n", 1)[1]
+        overview, details = diagnostics.split("\n\n", 1)
+        set_one, set_five, other_shifts = details.split("\n\n")
+        assert set_one.splitlines() == [
+            "Set 1 retained (2 of 2 ties flagged)",
+            "  Row 1  0.258 to 0.678 m  -3.54 uGal",
+            "  Row 2  0.258 to 1.165 m  -5.66 uGal",
+            "  Lowest fitted height on omission  0.258 to 0.261 m",
+            "  Transfer shift on omission (uGal)  -1.20",
+            "  Standard uncertainty (uGal)  1.06 to 0.799",
+        ]
+        assert "Set 5 retained (1 of 1 tie flagged)" in set_five
+        assert "Row 6  0.711 to 1.292 m  +3.66 uGal" in set_five
+        assert "Lowest fitted height" not in set_five
+        assert "set 5" not in other_shifts
+        assert "8 sets checked, 2 flagged, 0 with unavailable predictions." in overview
+        assert "Inspection threshold 3 uGal" in " ".join(summary.split())
+        assert "exceeds the Inspection threshold in Fit summary" in overview
+        assert "Final-fit inspection" not in review
+        assert "predicted minus observed" in overview
+    else:
+        assert "Review note" not in review
+        assert "Inspection threshold" not in summary
+        assert "Leave-one-set-out check" not in report
+        assert (
+            "Set 1: check all ties. The shared reference height (258 mm) is flagged."
+            in review
+        )
+        assert "Set 5: check the 711 to 1292 mm tie." in review
+
+
+def test_leave_one_set_out_report_uses_original_rows(tmp_path):
+    main(
+        [
+            str(SOCHI_TIES),
+            "-o",
+            str(tmp_path),
+            "--no-plot",
+            "--exclude-set",
+            "1",
+            "--leave-one-set-out",
+        ]
+    )
+
+    report = (tmp_path / "sochi_vgg_fit.txt").read_text()
+    diagnostics = report.split("Leave-one-set-out check\n", 1)[1]
+    _, details = diagnostics.split("\n\n", 1)
+    assert details.split("\n\n", 1)[0].splitlines() == [
+        "Set 5 retained (1 of 1 tie flagged)",
+        "  Row 6  0.711 to 1.292 m  +3.53 uGal",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("options", "flagged_sets"),
+    [(["--leave-one-set-out"], {1, 5}), (["--tie-tolerance", "6"], set())],
+)
+def test_leave_one_set_out_inspects_errors_above_tolerance(
+    tmp_path, options, flagged_sets
+):
+    main([str(SOCHI_TIES), "-o", str(tmp_path), "--no-plot", *options])
+
+    report = (tmp_path / "sochi_vgg_fit.txt").read_text()
+    diagnostics = report.split("Leave-one-set-out check\n", 1)[1]
+    check = diagnostics.split("\n\nTransfer model:", 1)[0]
+    assert {
+        int(line.split()[1]) for line in check.splitlines() if line.startswith("Set ")
+    } == flagged_sets
+    assert f"8 sets checked, {len(flagged_sets)} flagged" in diagnostics
+
+
+def test_leave_one_set_out_reports_unavailable_predictions(tmp_path):
+    source = tmp_path / "ties.csv"
+    source.write_text(
+        "set_id,h1,h2,delta_g\nA,0,250,-75\nA,0,500,-148\nA,0,750,-224\nA,0,1000,-295\n"
+    )
+    main([str(source), "-o", str(tmp_path), "--leave-one-set-out", "--no-plot"])
+
+    report = (tmp_path / "ties_vgg_fit.txt").read_text()
+    check = report.split("Leave-one-set-out check\n", 1)[1]
+    assert "Set A has 4 ties with unavailable predictions." in check
+    assert "No measurement sets remain." in check
+    assert "1 set checked, 0 flagged, 1 with unavailable predictions." in check
+
+
+def test_leave_one_set_out_flags_large_errors_in_review(tmp_path):
+    source = tmp_path / "ties.csv"
+    source.write_text(
+        "set_id,h1,h2,delta_g\n"
+        "A,0,1000,-250\nA,0,2000,-500\n"
+        "B,0,1000,-299\nB,0,2000,-601\n"
+        "C,0,1000,-301\nC,0,2000,-599\n"
+        "D,0,1000,-300\nD,0,2000,-601\n"
+    )
+    main(
+        [
+            str(source),
+            "-d",
+            "1",
+            "-o",
+            str(tmp_path),
+            "--leave-one-set-out",
+            "--no-plot",
+        ]
+    )
+
+    report = (tmp_path / "ties_vgg_fit.txt").read_text()
+    check = report.split("Leave-one-set-out check\n", 1)[1]
+    assert "Set A retained (2 of 2 ties flagged)" in check
+    assert "Row 1  0 to 1 m" in check
+    assert "Row 2  0 to 2 m" in check
+
+
+def test_set_diagnostics_include_requested_transfer_shift(tmp_path):
+    main(
+        [
+            str(SOCHI_TIES),
+            "-o",
+            str(tmp_path),
+            "--no-plot",
+            "--exclude-set",
+            "1",
+            "--loso-transfer",
+            "0.270",
+            "1.200",
+            "--tie-tolerance",
+            "4",
+        ]
+    )
+
+    report = (tmp_path / "sochi_vgg_fit.txt").read_text()
+    summary, diagnostics = report.split("Leave-one-set-out check\n", 1)
+    overview, explanation = diagnostics.split("\n\n", 1)
+    assert "7 sets checked, 0 flagged, 0 with unavailable predictions." in overview
+    assert "Inspection threshold 4 uGal" in " ".join(summary.split())
+    assert "from 0.27 to 1.2 m" in explanation
+    assert "set 5 +0.38" in explanation
+    assert "set 7 -0.30" in explanation
 
 
 def test_fit_with_mapped_columns_and_source_units(tmp_path, capsys):
@@ -126,8 +244,8 @@ def test_fit_with_mapped_columns_and_source_units(tmp_path, capsys):
         "Input heights (lower, upper) in m. Gravity differences (diff) in mGal."
         in report
     )
-    assert "Match Set to set in the original ties." in report
-    assert f"Input source {source}" in " ".join(report.split())
+    assert "Input source" not in report
+    assert str(source) not in report
     assert "Input columns  set_id=set, h1=lower, h2=upper, delta_g=diff" in report
     assert "Set 5: check the 0.711 to 1.292 m tie." in report
     assert "-6.711 +/- 0.024" in report
@@ -137,39 +255,63 @@ def test_fit_with_mapped_columns_and_source_units(tmp_path, capsys):
     )
 
 
-@pytest.mark.parametrize("automatic", [False, True])
-def test_exclude_sets_from_cli_preserves_input(tmp_path, automatic):
+def test_exclude_sets_from_cli_preserves_input(tmp_path):
     source = tmp_path / "ties.csv"
     original = SOCHI_TIES.read_bytes()
     source.write_bytes(original)
-    options = (
-        ["--auto-exclude"]
-        if automatic
-        else ["--exclude-set", "1", "--exclude-set", "5"]
+    main(
+        [
+            "-i",
+            str(source),
+            "-o",
+            str(tmp_path),
+            "--leave-one-set-out",
+            "--exclude-set",
+            "1",
+            "--exclude-set",
+            "5",
+            "--exclude-reason",
+            "1",
+            "Reference height could not be verified.",
+        ]
     )
-    main(["-i", str(source), "-o", str(tmp_path), "--leave-one-set-out", *options])
 
     assert source.read_bytes() == original
     report = (tmp_path / "ties_vgg_fit.txt").read_text()
-    summary, held_out = report.split("Leave-one-set-out summary:", 1)
-    assert "Excluded sets 1, 5" in " ".join(summary.split())
-    if automatic:
-        assert "Auto-excluded sets 1, 5" in " ".join(summary.split())
-        assert "Set 7: check" in summary
+    summary, diagnostics = report.split("Leave-one-set-out check\n", 1)
+    assert "Excluded sets 2 (IDs 1, 5)" in " ".join(summary.split())
+    assert (
+        "Manual exclusions\n  Set 1: Reference height could not be verified.\n"
+        "  Set 5: Unspecified reason\n"
+    ) in summary
     assert "Ties used 6" in " ".join(summary.split())
-    held_out, data = held_out.split("Data:", 1)
-    assert [row.split()[0] for row in held_out.splitlines()[4:] if row] == [
-        "2",
-        "3",
-        "4",
-        "6",
-        "7",
-        "8",
-    ]
+    overview = diagnostics.split("\n\n", 1)[0]
+    data = diagnostics.split("\nData:\n", 1)[1]
+    assert overview == "6 sets checked, 0 flagged, 0 with unavailable predictions."
     assert "Original input ties, including excluded sets." in data
     assert (
         pd.read_csv(source).to_string(index=False, na_rep="", float_format=str) in data
     )
+
+
+def test_cli_rejects_removed_auto_exclusion(tmp_path, capsys):
+    with pytest.raises(SystemExit) as error:
+        main([str(SOCHI_TIES), "-o", str(tmp_path), "--auto-exclude"])
+
+    assert error.value.code == 2
+    assert "unrecognized arguments: --auto-exclude" in capsys.readouterr().err
+    assert not list(tmp_path.iterdir())
+
+
+def test_exclusion_reason_requires_a_manual_exclusion(tmp_path, capsys):
+    with pytest.raises(SystemExit) as error:
+        main([str(SOCHI_TIES), "-o", str(tmp_path), "--exclude-reason", "1", "Reason"])
+
+    assert error.value.code == 2
+    assert (
+        "--exclude-reason for '1' requires --exclude-set '1'" in capsys.readouterr().err
+    )
+    assert not list(tmp_path.iterdir())
 
 
 def test_plot_options(tmp_path, monkeypatch):
@@ -238,7 +380,7 @@ def test_stdin_input(tmp_path, monkeypatch):
     assert not stream.closed
     assert (tmp_path / "vgg_fit.png").is_file()
     report = (tmp_path / "vgg_fit.txt").read_text()
-    assert "Input source stdin" in " ".join(report.split())
+    assert "Input source" not in report
 
 
 def test_overwrite_requires_an_explicit_option(tmp_path, capsys):

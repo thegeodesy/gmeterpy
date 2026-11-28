@@ -1,8 +1,9 @@
 """Plain-text reporting for the vgfit command."""
 
-from collections.abc import Mapping
+from collections.abc import Hashable, Mapping
 from datetime import UTC, datetime
 from os import PathLike
+from textwrap import fill
 
 import numpy as np
 import pandas as pd
@@ -11,6 +12,8 @@ import gmeterpy.units as u
 from gmeterpy.models.vgg import FloatingGravityFitResults
 
 from .input import resolve_columns
+
+DEFAULT_TIE_TOLERANCE = 3.0
 
 
 def write_report(
@@ -24,7 +27,10 @@ def write_report(
     height_unit: u.UnitBase = u.mm,
     gravity_unit: u.UnitBase = u.uGal,
     held_out_ties: pd.DataFrame | None = None,
+    held_out_transfers: pd.DataFrame | None = None,
+    tie_tolerance: float = DEFAULT_TIE_TOLERANCE,
     review_note: str | None = None,
+    exclusion_reasons: Mapping[Hashable, str] | None = None,
 ) -> None:
     r"""Write a vertical gravity fit report.
 
@@ -35,12 +41,12 @@ def write_report(
     path : str or os.PathLike
         Destination file.
     station : str, optional
-        Station name used in the report.
+        Station name shown in the fit summary.
     data : pandas.DataFrame, optional
         Original tie table. Printed with its original column names, units,
-        and row order. Defaults to prepared floating observations.
+        and row order when supplied.
     input_source : str, optional
-        Filename or stdin label shown in the fit summary.
+        Source label accepted for compatibility with earlier callers.
     columns : mapping, optional
         Maps fit fields to headers in the original tie table.
     height_unit, gravity_unit : ~astropy.units.UnitBase, optional
@@ -49,17 +55,22 @@ def write_report(
     held_out_ties : pandas.DataFrame, optional
         Tie prediction table returned as the second item by
         ``FloatingGravityFit.leave_one_set_out()``. The report summarizes
-        the mean and RMS prediction error by omitted set.
+        the flagged ties and their signed prediction errors by set.
+    held_out_transfers : pandas.DataFrame, optional
+        First table returned by leave-one-set-out for a single transfer pair.
+    tie_tolerance : float, optional
+        Flag held-out tie errors whose magnitude exceeds this tolerance in
+        microgals. Defaults to 3.
     review_note : str, optional
-        Reviewer comments. A supplied note appears in the fit summary when
-        sets were excluded or no inspection is needed. Otherwise it appears
-        in Inspection, which shows "Pending" when no note is supplied.
+        Reviewer comments shown in the Review section.
+    exclusion_reasons : mapping, optional
+        Reasons keyed by manually excluded set ID, shown in the Review section.
 
     Notes
     -----
     The fit summary includes the report generation time in UTC. The
-    inspection section identifies ties to check when diagnostics flag
-    an issue. The transfer model section gives its full-precision
+    Review section records exclusions and ties to check in the final fit. The transfer model
+    section gives its full-precision
     coefficients, covariance, and base units. The full fit lists all
     parameters and their regression covariance. Each covariance entry has
     the product of the corresponding parameter units.
@@ -89,6 +100,12 @@ def write_report(
     res = results.regression
     number_of_sets = observations.set_id.nunique()
     excluded_sets = results.excluded_set_ids
+    reasons = exclusion_reasons or {}
+    for set_id in reasons:
+        if set_id not in excluded_sets:
+            raise ValueError(
+                f"An exclusion reason requires a manually excluded set: {set_id!r}"
+            )
     observed_min, observed_max = results.fitted_height_range
     offset_min_heights = observations.groupby("set_id").h.min()
     offset_names = {
@@ -107,9 +124,10 @@ def write_report(
     predictions = results.prediction_table(
         h_control[initial] * u.m, h_control[final] * u.m
     )
-    influence_report, flagged = _influence_report(results, source_columns, height_unit)
     inspection = []
-    if not flagged.empty:
+    if held_out_ties is None:
+        influence = results.influence_table()
+        flagged = influence.loc[influence.inspect, ["set_id", "h"]]
         for set_id, group in flagged.groupby("set_id", sort=False):
             heights = group.h.unique()
             if (
@@ -146,26 +164,27 @@ def write_report(
                         f"Set {set_id}: check ties from {reference_height:.6g} {height_unit} "
                         f"to {height * u.m.to(height_unit):.6g} {height_unit}."
                     )
+    held_out_check = ""
     if held_out_ties is not None:
-        missing = held_out_ties.loc[held_out_ties.prediction_error.isna(), "set_id"]
-        unavailable_sets = missing.astype(str).unique()
-        if len(unavailable_sets):
-            label = "set" if len(unavailable_sets) == 1 else "sets"
-            inspection.append(
-                f"Missing held-out predictions for {label} {', '.join(unavailable_sets)}. "
-                "Check the remaining levels and residual degrees of freedom for each omission."
-            )
+        if not np.isfinite(tie_tolerance) or tie_tolerance <= 0:
+            raise ValueError("Tie tolerance must be finite and greater than zero")
+        inspected = held_out_ties.assign(
+            inspect=held_out_ties.prediction_error.abs().gt(tie_tolerance)
+        )
+        held_out_check = _held_out_diagnostics(
+            observations.set_id.unique(),
+            (observed_min, observed_max),
+            inspected,
+            tie_tolerance,
+            held_out_transfers,
+        )
 
     note = (review_note or "").strip()
-    note_in_summary = bool(note and (excluded_sets or not inspection))
     with open(path, "w", encoding="utf-8") as f:
-        f.write(
-            "Results of the polynomial fit of the vertical gravity gradients at "
-            + station
-            + "\n\n"
-        )
+        f.write("Vertical gravity fit report\n\n")
         fit_summary = [
             ("Generated at", datetime.now(UTC).isoformat(timespec="seconds")),
+            ("Station", station or "Unspecified"),
             ("Method", results.method_name),
             ("Polynomial degree", model.degree),
             (
@@ -183,35 +202,44 @@ def write_report(
             ("Residual standard deviation", f"{results.s0:.3g} uGal"),
             ("Sum of squared residuals", f"{res.ssr:.6g} uGal^2"),
         ]
-        if input_source is not None:
-            fit_summary.insert(1, ("Input source", input_source))
+        exclusion_summary = str(len(excluded_sets))
         if excluded_sets:
-            fit_summary.append(("Excluded sets", ", ".join(map(str, excluded_sets))))
-        if results.auto_excluded_set_ids is not None:
-            fit_summary.append(
-                (
-                    "Auto-excluded sets",
-                    ", ".join(map(str, results.auto_excluded_set_ids)) or "None",
-                )
-            )
-        if note_in_summary:
-            fit_summary.append(("Review note", note))
+            exclusion_summary += f" (IDs {', '.join(map(str, excluded_sets))})"
+        fit_summary.append(("Excluded sets", exclusion_summary))
+        if held_out_ties is not None:
+            fit_summary.append(("Inspection threshold", f"{tie_tolerance:g} uGal"))
         f.write("Fit summary:\n" + 12 * "*" + "\n")
         for label, value in fit_summary:
             f.write(f"{label:<28} {value}\n")
         f.write("\n")
-        if inspection:
-            f.write("Inspection:\n" + 11 * "*" + "\n")
-            f.write("\n".join(inspection) + "\n")
-            if not note_in_summary:
-                f.write(f"Review note: {note or 'Pending'}\n")
+
+        if note or excluded_sets or held_out_check or inspection:
+            f.write("Review:\n" + 7 * "*" + "\n")
+            if note:
+                f.write(f"Review note    {note}\n")
+            if excluded_sets:
+                if note:
+                    f.write("\n")
+                f.write("Manual exclusions\n")
+                for set_id in excluded_sets:
+                    reason = reasons.get(set_id, "").strip() or "Unspecified reason"
+                    f.write(f"  Set {set_id}: {reason}\n")
+            if held_out_check:
+                if note or excluded_sets:
+                    f.write("\n")
+                f.write(held_out_check)
+            if inspection:
+                if note or excluded_sets:
+                    f.write("\n")
+                f.write("Final-fit inspection\n")
+                f.write("\n".join(inspection) + "\n")
             f.write("\n")
 
         f.write("Transfer model:\n" + 15 * "*" + "\n")
         coefficient_names = [f"a{k}" for k in range(model.degree + 1)]
-        height_powers = ["1"]
-        height_powers.extend(
-            "h" if k == 1 else f"h^{k}" for k in range(1, model.degree + 1)
+        polynomial_terms = ["a0"]
+        polynomial_terms.extend(
+            "a1*h" if k == 1 else f"a{k}*h^{k}" for k in range(1, model.degree + 1)
         )
         difference_terms = ["0"]
         difference_terms.extend(
@@ -220,14 +248,16 @@ def write_report(
         )
         covariance_rows = ",\n".join(f"    {row}" for row in covariance.tolist())
         f.write(
-            "Units (gravity, height)  uGal, m\n"
-            f"a = [{', '.join(coefficient_names)}]\n"
-            f"g(h) = [{', '.join(height_powers)}] @ a\n"
-            f"d = [{', '.join(difference_terms)}]\n"
-            "delta_g(h1, h2) = g(h2) - g(h1) = d @ a\n"
-            "u(delta_g) = sqrt(d @ C @ d.T)\n"
-            "Standard uncertainty (k = 1) with transfer heights treated as exact.\n\n"
-            "Coefficient vector (ascending powers) and covariance (same order)\n"
+            "Use heights in metres. Gravity differences and uncertainties are in uGal.\n\n"
+            "Gravity difference\n"
+            f"  g(h) = {' + '.join(polynomial_terms)}\n"
+            "  delta_g = g(h2) - g(h1)\n\n"
+            "Standard uncertainty (k = 1)\n"
+            f"  d = [{', '.join(difference_terms)}]\n"
+            "  u(delta_g) = sqrt(d @ C @ d.T)\n"
+            "  Transfer heights are treated as exact.\n\n"
+            "Full-precision coefficients and covariance\n"
+            f"a and the rows and columns of C follow the order [{', '.join(coefficient_names)}].\n"
             f"a = {coefficients.tolist()}\n"
             f"C = [\n{covariance_rows}\n]\n\n"
         )
@@ -258,51 +288,31 @@ def write_report(
                     "uGal",
                 )
             )
-        parameter_width = max(len("Param."), max(len(name) for name, *_ in parameters))
+        parameter_table = pd.DataFrame(
+            parameters, columns=["Param.", "h_min (m)", "Value", "Std. unc.", "Unit"]
+        )
+        parameter_order = parameter_table["Param."]
+        full_covariance = results.parameter_covariance.rename(
+            index=offset_names, columns=offset_names
+        )
+        estimated_order = parameter_order[parameter_order.isin(full_covariance.columns)]
+        covariance_table = (
+            full_covariance.reindex(index=estimated_order, columns=estimated_order)
+            .rename_axis("Param.")
+            .reset_index()
+        )
         f.write("Full fit:\n" + 9 * "*" + "\n")
+        f.write(parameter_table.to_string(index=False) + "\n\n")
         f.write(
-            f"{'Param.':<{parameter_width}} {'h_min (m)':>9} {'Value':>11} "
-            f"{'Std. unc.':>11}  Unit\n"
+            "Full covariance matrix\n"
+            "Entries use products of parameter units.\n"
+            + covariance_table.to_string(index=False, float_format="{:.6g}".format)
+            + "\n\n"
         )
-        for name, height, value, uncertainty, unit in parameters:
-            f.write(
-                f"{name:<{parameter_width}} {height:>9} {value:>11} "
-                f"{uncertainty:>11}  {unit}\n"
-            )
-        f.write("\n")
 
-        f.write("Full covariance matrix\n")
-        f.write("Entries use products of parameter units.\n")
-        f.write(
-            results.parameter_covariance.rename(
-                index=offset_names, columns=offset_names
-            ).to_string(float_format="{:.6g}".format)
-        )
-        f.write("\n\n")
-
-        f.write(influence_report)
-
-        if held_out_ties is not None:
-            f.write("Leave-one-set-out summary:\n" + 26 * "*" + "\n")
-            f.write("Held-out tie errors (predicted minus observed)\n")
-            f.write(f"{'Set':<6} {'Ties':>5} {'Mean (uGal)':>12} {'RMS (uGal)':>12}\n")
-            for set_id, group in held_out_ties.groupby("set_id", sort=False):
-                errors = group.prediction_error.dropna()
-                if errors.empty:
-                    mean = rms = "n/a"
-                else:
-                    mean = f"{errors.mean():+.2f}"
-                    rms = f"{np.sqrt((errors**2).mean()):.2f}"
-                f.write(f"{set_id!s:<6} {len(group):5d} {mean:>12} {rms:>12}\n")
-            f.write("\n")
-        f.write("Data:\n")
-        f.write(5 * "*" + "\n")
-        if data is None:
-            display_data = observations.rename(
-                columns={"h": "h (m)", "g": "g (uGal)", "resid": "resid (uGal)"}
-            )
-            f.write(display_data.to_string(index=False, na_rep="---") + "\n\n")
-        else:
+        if data is not None:
+            f.write("Data:\n")
+            f.write(5 * "*" + "\n")
             if excluded_sets:
                 f.write("Original input ties, including excluded sets.\n")
             if source_columns is not None:
@@ -346,61 +356,131 @@ def write_report(
         f.write("\n")
 
 
-def _influence_report(
-    results: FloatingGravityFitResults,
-    columns: Mapping[str, str] | None,
-    height_unit: u.UnitBase,
-) -> tuple[str, pd.DataFrame]:
-    """Format influence diagnostics and return the flagged heights and sets."""
-    table = results.influence_table()
-    n = results.number_of_observations
-    p = results.number_of_unknowns
-    residual_limit, leverage_limit, cook_limit = results.inspection_limits
-    flagged_rows = table.pop("inspect")
-    flagged = table.loc[flagged_rows].filter(items=["set_id", "h"])
-    table["Inspect"] = np.where(flagged_rows, "*", "")
-    table = table.drop(columns="unit_leverage").rename(
-        columns={
-            "set_id": "Set",
-            "h": "h (m)",
-            "g": "g (uGal)",
-            "resid": "Resid. (uGal)",
-            "leverage": "Lev.",
-            "studentized_residual": "Stud. resid.",
-            "cooks_distance": "Cook's D",
-        }
+def _held_out_diagnostics(
+    set_ids: np.ndarray,
+    fitted_height_range: tuple[float, float],
+    held_out_ties: pd.DataFrame,
+    tolerance: float,
+    held_out_transfers: pd.DataFrame | None,
+) -> str:
+    """Show the evidence and consequences of omitting flagged sets."""
+    ties_by_set = dict(iter(held_out_ties.groupby("set_id", sort=False)))
+    transfers = {}
+    if held_out_transfers is not None and not held_out_transfers.empty:
+        if len(held_out_transfers[["h1", "h2"]].drop_duplicates()) != 1:
+            raise ValueError(
+                "The leave-one-set-out report requires a single transfer pair"
+            )
+        transfers = {row.omitted_set_id: row for row in held_out_transfers.itertuples()}
+
+    shifts = {}
+    for set_id, transfer in transfers.items():
+        shift = "n/a"
+        if pd.notna(transfer.transfer_shift):
+            extrapolated = transfer.full_fit_extrapolated or transfer.refit_extrapolated
+            shift = f"{transfer.transfer_shift:+.2f}{' E' if extrapolated else ''}"
+        shifts[set_id] = shift
+
+    details = []
+    flagged_sets = set()
+    unavailable_count = 0
+    for set_id in set_ids:
+        ties = ties_by_set.get(set_id)
+        if ties is None:
+            unavailable_count += 1
+            details.extend(["", f"Set {set_id} has unavailable predictions."])
+            continue
+        flagged = ties.loc[ties.inspect]
+        missing = int(ties.prediction_error.isna().sum())
+        if not flagged.empty:
+            flagged_sets.add(set_id)
+            noun = "tie" if len(ties) == 1 else "ties"
+            details.extend(
+                [
+                    "",
+                    f"Set {set_id} retained ({len(flagged)} of {len(ties)} {noun} flagged)",
+                ]
+            )
+            for tie in flagged.itertuples(index=False):
+                source_row = getattr(tie, "source_row", None)
+                row_label = f"Row {int(source_row)}  " if pd.notna(source_row) else ""
+                error = f"{tie.prediction_error:+.2f}"
+                if abs(float(error)) <= tolerance:
+                    error = f"{tie.prediction_error:+}"
+                details.append(
+                    f"  {row_label}{tie.h1:.6g} to {tie.h2:.6g} m  {error} uGal"
+                )
+            reference = ties.iloc[0]
+            for label, original, column in zip(
+                ("Lowest", "Highest"),
+                fitted_height_range,
+                ("refit_height_min", "refit_height_max"),
+                strict=True,
+            ):
+                refitted = reference.get(column, np.nan)
+                if pd.notna(refitted) and refitted != original:
+                    details.append(
+                        f"  {label} fitted height on omission  {original:.6g} to {refitted:.6g} m"
+                    )
+            if set_id in transfers:
+                transfer = transfers[set_id]
+                details.append(f"  Transfer shift on omission (uGal)  {shifts[set_id]}")
+                refit_uncertainty = getattr(transfer, "refit_uncertainty", np.nan)
+                if pd.notna(refit_uncertainty) and pd.notna(
+                    transfer.full_fit_uncertainty
+                ):
+                    details.append(
+                        "  Standard uncertainty (uGal)  "
+                        f"{transfer.full_fit_uncertainty:.3g} to {refit_uncertainty:.3g}"
+                    )
+        if missing:
+            unavailable_count += 1
+            noun = "tie" if missing == 1 else "ties"
+            details.extend(
+                ["", f"Set {set_id} has {missing} {noun} with unavailable predictions."]
+            )
+            fit_error = ties.iloc[0].get("fit_error")
+            if pd.notna(fit_error):
+                details.append(f"  {fit_error}.")
+
+    lines = ["Leave-one-set-out check"]
+    set_label = "set" if len(set_ids) == 1 else "sets"
+    lines.append(
+        f"{len(set_ids)} {set_label} checked, {len(flagged_sets)} flagged, "
+        f"{unavailable_count} with unavailable predictions."
     )
-    lines = [
-        "Influence diagnostics:",
-        "*" * 22,
-        "Floating observations. Residuals are fitted minus observed.",
-        table.to_string(index=False, float_format="{:.3f}".format, na_rep="n/a"),
-        "",
-        "  *  Observation flagged for inspection. Any one rule can trigger the flag.",
-        "",
-        "     Criterion          Rule",
-        f"     Large residual     |Stud. resid.| > {residual_limit}",
-        f"     High leverage      Lev. > 2p/n ({leverage_limit:.3f} for this fit)",
-        f"     Cook's distance    Cook's D > 4/n ({cook_limit:.3f} for this fit)",
-        "     Unit leverage      Lev. is approximately 1",
-        "",
-        "     Stud. resid. is the internally studentized residual. At unit",
-        "     leverage, Stud. resid. and Cook's D are undefined (n/a).",
-        f"     n = {n:.0f} fitted observations. p = {p} fitted parameters, including offsets.",
-    ]
-    if leverage_limit >= 1:
-        lines.append("     The high-leverage cutoff reaches or exceeds 1 for this fit.")
-    if columns is not None:
+    if flagged_sets:
         lines.extend(
             [
-                "",
-                f"     Match Set to {columns['set_id']} in the original ties.",
-                f"     Check ties whose {columns['h1']} or {columns['h2']} matches",
-                f"     the flagged height after conversion to {height_unit}.",
-                "     For a flagged shared reference height, check all ties in that set.",
+                "A tie is flagged when its absolute error exceeds the Inspection threshold in Fit summary.",
+                "Errors are predicted minus observed.",
             ]
         )
-    return "\n".join(lines) + "\n\n", flagged
+    if transfers and flagged_sets:
+        baseline = next(iter(transfers.values()))
+        lines.append(
+            f"Transfer from {baseline.h1!r} to {baseline.h2!r} m "
+            "(shifts are refit minus final fit)."
+        )
+    lines.extend(details)
+    other_shifts = [
+        f"set {set_id} {shift}"
+        for set_id, shift in shifts.items()
+        if set_id not in flagged_sets
+    ]
+    if other_shifts:
+        if flagged_sets:
+            heading = "Other transfer shifts (uGal)"
+        else:
+            baseline = next(iter(transfers.values()))
+            heading = (
+                f"Transfer shifts (uGal) from {baseline.h1!r} to {baseline.h2!r} m, "
+                "refit minus final fit."
+            )
+        lines.extend(["", heading, fill(", ".join(other_shifts), width=88)])
+    if any(shift.endswith(" E") for shift in shifts.values()):
+        lines.append("E marks extrapolation in either fit.")
+    return "\n".join(lines) + "\n"
 
 
 def _format_uncertainty(value: float, uncertainty: float) -> str:
