@@ -153,7 +153,7 @@ def write_report(
         )
         fit_summary = [
             ("Generated at", datetime.now(UTC).isoformat(timespec="seconds")),
-            ("Method", "Floating gravity OLS"),
+            ("Method", results.method_name),
             ("Polynomial degree", model.degree),
             (
                 "Observed height range",

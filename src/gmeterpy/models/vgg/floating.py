@@ -1,7 +1,7 @@
 """Floating gravity polynomial adjustment following Jaakko Mäkinen (2010)."""
 
 import itertools
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
 import pandas as pd
@@ -31,7 +31,14 @@ class FloatingGravityFit:
     ----------
     degree : int, optional
         Positive polynomial degree. Default is 2.
+
+    Attributes
+    ----------
+    method_name : str
+        Display name of the fitting method.
     """
+
+    method_name: ClassVar[str] = "Floating gravity OLS"
 
     def __init__(self, degree: int = 2) -> None:
         if degree < 1:
@@ -144,7 +151,9 @@ class FloatingGravityFit:
             np.pad(covariance.to_numpy(), ((1, 0), (1, 0))),
             units=(u.uGal, u.m),
         )
-        return FloatingGravityFitResults(observations, regression, fitted_model)
+        return FloatingGravityFitResults(
+            observations, regression, fitted_model, method_name=self.method_name
+        )
 
     @u.quantity_input(h1=u.m, h2=u.m, delta_g=u.uGal, transfer_h1=u.m, transfer_h2=u.m)
     def leave_one_set_out(
@@ -333,6 +342,8 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         Fitted equal-weight regression, including set offsets.
     fitted_model : PolynomialVerticalGravity
         Gravity model with coefficient covariance, constructed once by fit.
+    method_name : str, optional
+        Display name of the fitting method.
 
     Notes
     -----
@@ -360,10 +371,18 @@ class FloatingGravityFitResults(PolynomialVerticalGravityFitResults):
         observations: pd.DataFrame,
         regression: "RegressionResultsWrapper",
         fitted_model: PolynomialVerticalGravity,
+        *,
+        method_name: str = FloatingGravityFit.method_name,
     ) -> None:
         """Retain the fitted model and snapshot the prepared observations."""
         super().__init__(regression, fitted_model)
         self._observations = observations.drop(columns="resid", errors="ignore").copy()
+        self._method_name = method_name
+
+    @property
+    def method_name(self) -> str:
+        """Display name of the method used to fit the model."""
+        return self._method_name
 
     @property
     def observations(self) -> pd.DataFrame:
